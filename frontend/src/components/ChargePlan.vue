@@ -9,7 +9,7 @@ import {
 import type { HomeAssistant } from "../types";
 import { timeSeconds } from "../time";
 
-const props = defineProps<{ hass?: HomeAssistant }>();
+const props = defineProps<{ hass?: HomeAssistant; automatic?: boolean }>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = useId();
 const german = computed(() => dashboard?.language.value === "de");
@@ -102,6 +102,34 @@ const chargingActive = computed(
     ["charging", "off"].includes(status.value ?? "") &&
     attributes.value.charging_active === true,
 );
+const fixedTargetLabel = computed(() => {
+  const tariff = dashboard?.tariff.value;
+  if (
+    !props.automatic ||
+    tariff?.tariff_type !== "time_of_use" ||
+    tariff.fixed_time_charging?.enabled ||
+    status.value !== "off" ||
+    !control.value?.available ||
+    control.value.state?.state !== "off"
+  )
+    return null;
+  const entity = dashboard?.entity("number", "timed_charge_min_soc");
+  const threshold = entity?.available ? finiteValue(entity.state?.state) : null;
+  if (
+    threshold === null ||
+    !Number.isInteger(threshold) ||
+    threshold < 0 ||
+    threshold > 100
+  )
+    return null;
+  if (threshold === 0)
+    return german.value
+      ? "Start im Niedertarif bei 0 % Akkustand"
+      : "Starts during low-tariff hours at 0% battery charge";
+  return german.value
+    ? `Start im Niedertarif, sobald der Akkustand unter ${threshold} % fällt`
+    : `Starts during low-tariff hours when the battery falls below ${threshold}%`;
+});
 const reasons = computed<Record<string, string>>(() =>
   german.value
     ? {
@@ -198,6 +226,7 @@ const completed = computed(
 const demand = computed(() => {
   if (chargingActive.value) return "charging";
   if (fixedTimeStart.value) return "fixed-time";
+  if (fixedTargetLabel.value) return "fixed-target";
   if (postChargeStatus.value !== null)
     return postChargeStatus.value === "not_needed"
       ? "not-needed"
@@ -237,19 +266,24 @@ const demand = computed(() => {
       return "unknown";
   }
 });
-const demandLabel = computed(() =>
-  demand.value === "charging"
-    ? text.value.charging
-    : demand.value === "fixed-time"
-      ? german.value
+const demandLabel = computed(() => {
+  switch (demand.value) {
+    case "charging":
+      return text.value.charging;
+    case "fixed-time":
+      return german.value
         ? `Netzladen startet ab ${fixedTimeStart.value} Uhr`
-        : `Grid charging starts at ${fixedTimeStart.value}`
-      : demand.value === "not-needed"
-        ? text.value.noCharge
-        : demand.value === "needed"
-          ? text.value.chargeNeeded
-          : text.value.demandUnknown,
-);
+        : `Grid charging starts at ${fixedTimeStart.value}`;
+    case "fixed-target":
+      return fixedTargetLabel.value;
+    case "not-needed":
+      return text.value.noCharge;
+    case "needed":
+      return text.value.chargeNeeded;
+    default:
+      return text.value.demandUnknown;
+  }
+});
 function remainingDuration(seconds: number) {
   const minutes = Math.ceil(seconds / 60);
   const hours = Math.floor(minutes / 60);

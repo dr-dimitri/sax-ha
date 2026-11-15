@@ -22,7 +22,9 @@ let writes = 0;
 let activeTariff = "time_of_use";
 let tariffRevision = 1;
 let fixedTimeCharging = { enabled: false, start: null };
-const bridgePlan = new URLSearchParams(location.search).has("bridge-plan");
+const query = new URLSearchParams(location.search);
+const bridgePlan = query.has("bridge-plan");
+const dischargeForecast = bridgePlan || query.has("discharge-forecast");
 
 const general = [
   "soc",
@@ -65,7 +67,8 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
       !economics.includes(key) &&
       key !== "charging_pv_forecast" &&
       !(
-        bridgePlan && ["bridge_charge_plan", "discharge_forecast"].includes(key)
+        dischargeForecast &&
+        ["bridge_charge_plan", "discharge_forecast"].includes(key)
       ) &&
       !["timed_charge_", "grid_serving_", "price_charge_"].some((prefix) =>
         key.startsWith(prefix),
@@ -163,7 +166,7 @@ function example({ domain, key, entity_id }) {
     economics_net_savings: "1350.25",
     economics_status: "active",
     economics_current_import_price: "24.56",
-    bridge_charge_plan: "planned",
+    bridge_charge_plan: bridgePlan ? "planned" : "off",
     discharge_forecast: "2026-09-14T01:15:00Z",
   };
   state = values[key] ?? state;
@@ -223,7 +226,7 @@ function example({ domain, key, entity_id }) {
       average_discharge_w: 800,
       observed_at: "2026-09-13T21:00:00Z",
     };
-  if (key === "bridge_charge_plan")
+  if (key === "bridge_charge_plan" && bridgePlan)
     attributes = {
       enabled: true,
       charging_active: false,
@@ -240,6 +243,8 @@ function example({ domain, key, entity_id }) {
       target_soc: 60,
       shortfall_kwh: 0,
     };
+  if (key === "bridge_charge_plan" && !bridgePlan)
+    attributes = { reason: "disabled" };
   return { entity_id, state, attributes };
 }
 let states = Object.fromEntries(

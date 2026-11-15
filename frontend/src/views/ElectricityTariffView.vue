@@ -1311,6 +1311,7 @@ async function applyCharging(): Promise<void> {
           <ChargePlan
             v-if="active === 'time_of_use' || fixedTimeEnabled"
             :hass="hass"
+            :automatic="automatic === true"
           /><template v-else
             ><EntityValue
               domain="sensor"

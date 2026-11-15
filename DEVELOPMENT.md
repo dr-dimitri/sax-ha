@@ -865,7 +865,10 @@ Ladung nötig** oder **Ladeplanung: Ladung voraussichtlich nötig**. Nur der
 Zusatz hinter dem Doppelpunkt ist grün beziehungsweise blau, in beiden
 HA-Themes; die Aussage bleibt zusätzlich als Text erkennbar. Fehlende oder
 noch nicht bewertete Daten zeigen den orangefarbenen Zusatz **Ladezeitpunkt
-konnte noch nicht errechnet werden**.
+konnte noch nicht errechnet werden**. Bei aktiver automatischer Netzladung mit
+festem Netzladeziel und ausgeschaltetem Verbrauchsplan zeigt die Überschrift
+neutral die bestätigte SOC-Startschwelle im Niedertarif und bei 0 % die
+Bedingung „bei 0 % Akkustand“. Die Entladeprognose bleibt darunter sichtbar.
 Pausierte Aufträge benötigen eine erhaltene Bedarfsgrundlage für den blauen
 Zusatz. Eine frisch gemessene, bestätigte Netzladung zeigt stattdessen
 **Ladeplanung: Ladung läuft...** in Blau. Der Hinweis verwendet die zentral

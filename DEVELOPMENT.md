@@ -1101,7 +1101,11 @@ Hausverbrauch aus dem Netz gedeckt; deshalb berücksichtigt die Berechnung sowoh
 den Energiezuwachs im Speicher als auch die in dieser Zeit vermiedene Entladung.
 Das Ladeziel bleibt unter dem effektiven Netzlade-Max-SOC. Geplant wird jeweils
 ein zusammenhängender Auftrag: unter ausreichenden Kandidaten zuerst der
-günstigste, bei gleichem Preis der späteste mögliche Start. Reicht keiner aus,
+günstigste, bei gleichem Preis der späteste mögliche Start. Die Planung zieht
+den gesamten Ladeblock von dort um bis zu zehn Minuten vor. Der früheste Start
+liegt im Tarifabschnitt und setzt genug freie Kapazität für die geplante
+Lademenge voraus. Das Ziel-SOC folgt aus der Restenergie zu diesem Start und
+der geplanten Lademenge. Reicht kein Kandidat aus,
 wählt die Domain die größte mögliche Bedarfsdeckung und weist den verbleibenden
 Fehlbetrag aus. Ein solcher Teilplan verspricht keine vollständige Überbrückung.
 

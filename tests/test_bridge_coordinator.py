@@ -24,6 +24,7 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SMARTMETER,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from custom_components.sax_power.domain.registers import to_unsigned16
 
 NOW = datetime(2026, 9, 13, tzinfo=UTC)
 _CLOCK = "custom_components.sax_power.coordinator.monotonic"
@@ -125,6 +126,36 @@ async def test_planned_charge_replaces_min_soc_trigger_and_survives_forecast_res
     assert (
         coordinator.data["bridge_charge_plan_attributes"]["observation_minutes"] == 15
     )
+
+
+async def test_buffered_bridge_plan_starts_writing_at_published_start(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: 500 Wh last 30 minutes at 1 kW, so start at minute 20."""
+    coordinator.async_start_sun_charge = (
+        SaxPowerCoordinator.async_start_sun_charge.__get__(coordinator)
+    )
+    start = NOW + timedelta(minutes=20)
+    end = start + timedelta(minutes=15)
+    for when in (NOW, start - timedelta(seconds=1), start):
+        soc = 15 - (when - NOW) / timedelta(minutes=6)
+        await _evaluate(coordinator, when, _data(when, soc=soc))
+        attributes = coordinator.data["bridge_charge_plan_attributes"]
+        assert attributes["charge_start"] == start.isoformat()
+        assert attributes["charge_end"] == end.isoformat()
+        if when < start:
+            assert coordinator.data["bridge_charge_plan"] == "planned"
+            coordinator.async_write_extended_register.assert_not_awaited()
+
+    assert coordinator.data["bridge_charge_plan"] == "charging"
+    assert coordinator._bridge_charge_deadline == end
+    assert [
+        call.args for call in coordinator.async_write_extended_register.await_args_list
+    ] == [
+        (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT),
+        (REG_SUN_IC_POWER_SETPOINT_PCT, to_unsigned16(-10000)),
+    ]
+    await coordinator._async_cancel_sun_charge_task()
 
 
 @pytest.mark.parametrize("gap", ["pv", "measurements", "stale_measurements"])

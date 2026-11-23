@@ -157,7 +157,12 @@ requirement_bridge_charge:
     vom Netz gedeckt; dies verringert ebenfalls den Überbrückungsbedarf.
     Ein Auftrag ist zusammenhängend und endet innerhalb eines erlaubten
     Intervalls spätestens zum PV-Start. Ausreichende Kandidaten werden nach
-    Preis und anschließend spätestem Start ausgewählt. Reicht kein Kandidat,
+    Preis und anschließend spätestem Start ausgewählt. Gegenüber diesem
+    spätesten Start zieht die Planung den gesamten Ladeblock um bis zu
+    zehn Minuten vor. Die aktuelle Uhrzeit, der Beginn des erlaubten
+    Tarifabschnitts und der für die volle geplante Lademenge benötigte
+    Platz im Speicher begrenzen den Vorlauf. Das Ziel-SOC berücksichtigt
+    die zum vorgezogenen Start noch vorhandene Energie. Reicht kein Kandidat,
     ist ein begrenzter Teilauftrag mit größtmöglicher Bedarfsdeckung zulässig;
     die verbleibende Energiemenge wird ausdrücklich als Fehlbetrag angegeben.
 
@@ -306,6 +311,7 @@ requirement_bridge_charge:
     - "tests/test_pv_bridge_forecast.py belegt bei 2-Sekunden-Polls über zehn Minuten zehn Serviceaufrufe auch bei dauerhaft abgelehnten Antworten. Nur HomeAssistantError/TimeoutError wechseln auf zehn Sekunden; empfangene Ablehnungen und lokale Verarbeitungsfehler beenden diesen Retry. Ein unveränderter Ablehnungsgrund erzeugt bis zu einer gültigen Antwort oder einem Quellenwechsel keinen weiteren Logeintrag."
     - "Reicht die Batterie bis PV-Start, lautet der Status not_needed und es gibt keinen Ladeauftrag."
     - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
+    - "Bei ausreichendem Spielraum beginnen und enden Voll- und Teilaufträge zehn Minuten früher. Mit weniger Spielraum wird nur der verfügbare Vorlauf genutzt. Ladedauer, Lademenge und berechneter Fehlbetrag bleiben erhalten."
     - "Ein nicht vollständig deckbarer Bedarf bleibt als shortfall_kwh sichtbar, auch wenn eine Teilaufladung bereits läuft."
     - "Während des gestarteten Auftrags beendet der normale Entladeprognose-Reset allein nicht die Ladung. Der feste Endzeitpunkt und das SOC-Ziel bleiben verbindlich."
     - "Kurze PV-/Messdatenlücken erhalten den gestarteten Plan und dessen Verbrauchsbasis als Pause. Nach Rückkehr gültiger Daten wird ohne neue Entlademinute weitergeladen, sofern Ziel, Ende und Konfiguration weiterhin gelten. Fehlende Daten vor dem Start geben keinen Auftrag frei."

@@ -35,7 +35,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
@@ -1038,6 +1038,11 @@ class SaxPowerSensor(SaxPowerEntity, SensorEntity):
             self.hass, self._entry_id, self.entity_description.key
         )
 
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Der Recorder führt die Statistik beim Umbenennen selbst nach."""
+        super().async_entity_id_changed(old_entity_id)
+
     @property
     def native_value(self) -> StateType | date | datetime:
         if self.coordinator.data is None:
@@ -1155,6 +1160,11 @@ class SaxPowerEnergySensor(RestoreEntity, SaxPowerEntity, SensorEntity):
                 if math.isfinite(candidate) and candidate >= 0:
                     restored_value = candidate
         self._restore_fn(restored_value)
+
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Der Zählerstand gehört zum Config Entry und bleibt im Coordinator."""
+        super().async_entity_id_changed(old_entity_id)
 
     @property
     def native_value(self) -> StateType:

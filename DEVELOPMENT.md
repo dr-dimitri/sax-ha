@@ -118,7 +118,7 @@ frontend/             Vue-/TypeScript-Quellen, Build, Komponenten-/Browser-Tests
 
 `vue_dashboard.py` bindet das Custom Element `sax-power-vue-panel` über
 Home Assistants `panel_custom` unter `/sax-power-vue` ein. Grundlage ist die
-in `requirements_test.txt` unterstützte HA-Version. Der Panel-Adapter erhält
+in `hacs.json` angegebene HA-Mindestversion. Der Panel-Adapter erhält
 `hass`, `narrow`, `panel` und `route` vom HA-Frontend; `panel.config.entry_id`
 ordnet die Entity-Anbindung dem Config Entry zu. Die vier navigierbaren Views
 unter `frontend/src/views/` bilden das einzige mitgelieferte Dashboard **SAX Power**.
@@ -581,9 +581,10 @@ unter `http://127.0.0.1:5190` am Produktionsbundle mit simuliertem HA geprüft.
 Die Fixture bietet DE/EN, Themewechsel, Verbindungsabbruch und Schreibfehler.
 `/savings-preview.html` stellt die Ersparnisansicht mit simulierten
 HA-/Recorder-Antworten bereit. Diese Entwicklungsvorschauen werden nicht ins
-Integrationspaket übernommen. Die unterstützte und lokal geprüfte HA-Basis ist
-**2026.8.2** mit **home-assistant-frontend 20260729.7**; CI installiert dieselben
-Pins aus `requirements_test.txt`, HACS verwendet denselben Mindeststand.
+Integrationspaket übernommen. CI führt die gesamte Python-Testsuite mit
+HA **2026.8.2** (Frontend **20260729.7**) und **2026.11.2** (Frontend
+**20261028.6**) aus. Dazu gehören die Dashboardtests mit echten HA-HTTP- und
+WebSocket-Verbindungen. HACS setzt weiterhin HA **2026.8.2** voraus.
 
 Die Abhängigkeiten zeigen von den Home-Assistant-Entrypoints nach innen:
 `sensor.py`/`number.py`/`switch.py`/`time.py` verwenden den Coordinator, der
@@ -2440,8 +2441,8 @@ neue Freigabe aus (Details: REQ-TIMED-SOC-CHARGE, Issue #167).
 Das Manifest verwendet `pymodbus>=3.13.1`, weil Home Assistant die Bibliothek
 selbst benötigt und dessen Paket-Constraints die konkrete Version bestimmen.
 Ein eigener exakter Pin würde Core-Updates blockieren und wird von hassfest
-abgelehnt. `requirements_test.txt` hält die getestete Version weiterhin exakt
-fest; `tests/test_manifest.py` prüft die Kompatibilität mit dem Core-Constraint.
+abgelehnt. Beide CI-Umgebungen testen mit `pymodbus==3.13.1`.
+`tests/test_manifest.py` prüft die Kompatibilität mit den jeweiligen Core-Constraints.
 
 ```
 tests/
@@ -2674,6 +2675,12 @@ pip install -r requirements_test.txt
 # Alle Tests ausführen
 pytest -v
 ```
+
+Für HA 2026.11.2 in einer **separaten** Python-3.14-Umgebung
+`pip install -r requirements_test_2026_11.txt` und `pytest -v` ausführen.
+Diese Version bringt die offiziellen Fixtures aus `pytest-homeassistant` mit.
+Für die Mindestversion stellt `pytest-homeassistant-custom-component` die
+Fixtures bereit. Beide Pakete verwenden dieselben Fixture-Namen.
 
 Bei künftigen Läufen genügt (ggf. nach erneutem `pip install`, falls sich
 `requirements_test.txt` geändert hat):

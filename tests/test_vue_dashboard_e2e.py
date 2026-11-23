@@ -13,11 +13,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from pymodbus.client import AsyncModbusTcpClient
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
-from pytest_homeassistant_custom_component.typing import (
-    MockHAClientWebSocket,
-    WebSocketGenerator,
-)
 
 from custom_components.sax_power.const import (
     CHARGING_SETTING_KEYS,
@@ -27,6 +22,12 @@ from custom_components.sax_power.const import (
     DOMAIN,
 )
 from custom_components.sax_power.vue_dashboard import VUE_DASHBOARD_URL_PATH
+from tests.ha import (
+    MockConfigEntry,
+    MockHAClientWebSocket,
+    MockUser,
+    WebSocketGenerator,
+)
 
 from .test_integration_live import (
     _build_basic_registers,

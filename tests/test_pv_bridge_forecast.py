@@ -14,11 +14,11 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.infrastructure.pv_bridge_forecast import (
     PvBridgeForecast,
 )
+from tests.ha import MockConfigEntry
 
 NOW = datetime(2026, 9, 13, 20, 7, tzinfo=UTC)
 PV_START = datetime(2026, 9, 14, 5, tzinfo=UTC)

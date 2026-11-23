@@ -14,7 +14,6 @@ from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 from homeassistant.util.file import WriteError
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.infrastructure.control_store import (
@@ -22,6 +21,7 @@ from custom_components.sax_power.infrastructure.control_store import (
     ControlConfig,
     ControlConfigStore,
 )
+from tests.ha import async_fire_time_changed
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ async def test_failed_delayed_write_retries_without_another_setting_change(
     assert store.async_delay_save(ControlConfig(max_soc=65))
 
     with patch.object(
-        store._store, "_write_prepared_data", side_effect=WriteError("disk full")
+        store._store, "_async_write_data", side_effect=WriteError("disk full")
     ):
         await _elapse_save_delay(hass)
 
@@ -74,7 +74,7 @@ async def test_failed_immediate_write_reports_failure_and_remains_retryable(
     await store.async_save(ControlConfig(max_soc=90))
     with (
         patch.object(
-            store._store, "_write_prepared_data", side_effect=WriteError("disk full")
+            store._store, "_async_write_data", side_effect=WriteError("disk full")
         ),
         pytest.raises(HomeAssistantError),
     ):
@@ -175,7 +175,7 @@ async def test_failed_initial_migration_is_retried_after_bootstrap(
     await coordinator.async_set_max_soc(65)
     store = coordinator._control_store
     with patch.object(
-        store._store, "_write_prepared_data", side_effect=WriteError("disk full")
+        store._store, "_async_write_data", side_effect=WriteError("disk full")
     ):
         await coordinator.async_finish_bootstrap()
 
@@ -209,7 +209,7 @@ async def test_failed_unload_cannot_overwrite_settings_after_a_reload(
     await coordinator.async_set_max_soc(65)
     old_store = coordinator._control_store
     with patch.object(
-        old_store._store, "_write_prepared_data", side_effect=WriteError("disk full")
+        old_store._store, "_async_write_data", side_effect=WriteError("disk full")
     ):
         await coordinator.async_shutdown(reset_device=False)
 

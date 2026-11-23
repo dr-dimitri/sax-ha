@@ -10,10 +10,10 @@ from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import Unauthorized, UnknownUser
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 
 from custom_components.sax_power import _async_register_services
 from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
+from tests.ha import MockConfigEntry, MockUser
 
 
 @pytest.fixture(params=["timed_charge", "grid_serving"])

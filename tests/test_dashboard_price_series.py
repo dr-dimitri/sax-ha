@@ -8,8 +8,6 @@ from typing import Any
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
-from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -23,6 +21,7 @@ from custom_components.sax_power.const import (
 from custom_components.sax_power.dashboard_api import async_register_dashboard_api
 from custom_components.sax_power.dashboard_price_series import price_series
 from custom_components.sax_power.dashboard_tariff import SERIES_COMMAND
+from tests.ha import MockConfigEntry, MockUser, WebSocketGenerator
 
 
 def _options(tariff_type: str = "dynamic") -> dict[str, Any]:

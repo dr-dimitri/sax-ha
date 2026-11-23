@@ -12,8 +12,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
 from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -27,6 +25,7 @@ from custom_components.sax_power.diagnostics import (
     TO_REDACT,
     async_get_config_entry_diagnostics,
 )
+from tests.ha import MockConfigEntry
 
 
 def _make_entry_with_coordinator(hass) -> tuple[MockConfigEntry, SaxPowerCoordinator]:

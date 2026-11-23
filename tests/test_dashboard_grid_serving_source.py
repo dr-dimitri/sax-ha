@@ -12,8 +12,6 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pymodbus.exceptions import ModbusException
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
-from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.sax_power import async_update_options
 from custom_components.sax_power.const import (
@@ -31,6 +29,7 @@ from custom_components.sax_power.sensor import (
     SENSOR_DESCRIPTIONS,
     SaxPowerForecastSensor,
 )
+from tests.ha import MockConfigEntry, MockUser, WebSocketGenerator
 
 from .test_dashboard_tariff_response import _control_clock, _prepare, _toggle
 from .test_dashboard_tariff_response import _get as _get_tariff

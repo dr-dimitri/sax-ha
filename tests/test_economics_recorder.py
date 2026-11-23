@@ -8,7 +8,8 @@ import pytest
 from homeassistant.components.recorder import statistics
 from homeassistant.components.recorder.tasks import StatisticsTask
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.components.recorder.common import (
+
+from tests.ha import (
     async_recorder_block_till_done,
 )
 

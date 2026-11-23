@@ -9,7 +9,6 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
     CONF_BRIDGE_CHARGE_ENABLED,
@@ -20,6 +19,7 @@ from custom_components.sax_power.const import (
     DOMAIN,
 )
 from custom_components.sax_power.switch import SaxPowerBridgeChargeSwitch
+from tests.ha import MockConfigEntry
 
 from .test_integration_live import (
     _build_basic_registers,

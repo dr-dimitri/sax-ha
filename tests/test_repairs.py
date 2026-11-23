@@ -28,6 +28,7 @@ from custom_components.sax_power.const import (
     DOMAIN,
     ISSUE_ECONOMICS_PRICE_UNAVAILABLE,
     ISSUE_EMPTY_CHARGE_WINDOW,
+    ISSUE_EXTENDED_MODE_UNAVAILABLE,
     ISSUE_MAX_SOC_BELOW_MIN_SOC,
     ISSUE_NO_ACTIVE_MONTHS,
     ISSUE_PRICE_CHARGE_CONFLICT,
@@ -45,6 +46,7 @@ from custom_components.sax_power.const import (
     PRICE_STRATEGY_OFF,
     PRICE_STRATEGY_RELATIVE,
     PRICE_STRATEGY_SMART,
+    READ_BLOCK_EXT_COUNT,
     SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -58,6 +60,14 @@ from custom_components.sax_power.repairs import (
     VueDashboardRepairFlow,
     async_create_fix_flow,
 )
+from tests.ha import MockConfigEntry
+
+
+@pytest.fixture(autouse=True)
+def repair_entry(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(domain=DOMAIN, entry_id="test_entry_id")
+    entry.add_to_hass(hass)
+    return entry
 
 
 def _make_client() -> MagicMock:
@@ -165,6 +175,8 @@ async def test_self_diagnostic_issue_clears_after_reload(
     diagnostics.check(problem, after_grace)
     issue = _get_issue(hass, issue_key)
     assert issue is not None and issue.active
+    if hasattr(ir.IssueEntry, "config_entry_id"):
+        assert issue.config_entry_id == "test_entry_id"
 
     reloaded = SelfDiagnostics(hass, "test_entry_id")
     if problem_persists_after_reload:
@@ -173,6 +185,51 @@ async def test_self_diagnostic_issue_clears_after_reload(
     reloaded.check(healthy, after_grace + 2)
 
     assert _get_issue(hass, issue_key) is None
+
+
+async def test_sunspec_issue_clears_after_successful_first_read(
+    hass: HomeAssistant,
+) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS: Erste erfolgreiche Abfrage heilt den Hinweis."""
+    coordinator = _make_coordinator(hass)
+    coordinator.client.read_holding_registers = AsyncMock(side_effect=TimeoutError)
+    await coordinator._async_read_high_block()
+    issue = _get_issue(hass, ISSUE_EXTENDED_MODE_UNAVAILABLE)
+    assert issue is not None
+    ir.async_ignore_issue(hass, DOMAIN, issue.issue_id, True)
+    await coordinator.async_shutdown(reset_device=False)
+    if hasattr(ir.IssueEntry, "config_entry_id"):
+        retained = _get_issue(hass, ISSUE_EXTENDED_MODE_UNAVAILABLE)
+        assert retained is not None and retained.config_entry_id == "test_entry_id"
+        assert retained.dismissed_version is not None
+    else:
+        assert _get_issue(hass, ISSUE_EXTENDED_MODE_UNAVAILABLE) is None
+
+    reloaded = _make_coordinator(hass)
+    response = MagicMock(registers=[0] * READ_BLOCK_EXT_COUNT)
+    response.isError.return_value = False
+    reloaded.client.read_holding_registers = AsyncMock(return_value=response)
+    await reloaded._async_read_high_block()
+    assert _get_issue(hass, ISSUE_EXTENDED_MODE_UNAVAILABLE) is None
+
+
+async def test_removal_clears_unlinked_old_issues_of_this_entry_only(
+    hass: HomeAssistant, repair_entry: MockConfigEntry
+) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS: Auch Altmeldungen kennen ihre Entry-ID im Suffix."""
+    registry = ir.async_get(hass)
+    for suffix in (repair_entry.entry_id, "other"):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            f"legacy_{suffix}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="legacy",
+        )
+    await hass.config_entries.async_remove(repair_entry.entry_id)
+    assert registry.async_get_issue(DOMAIN, f"legacy_{repair_entry.entry_id}") is None
+    assert registry.async_get_issue(DOMAIN, "legacy_other") is not None
 
 
 # ===========================================================================

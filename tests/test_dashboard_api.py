@@ -11,11 +11,6 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
-from pytest_homeassistant_custom_component.typing import (
-    MockHAClientWebSocket,
-    WebSocketGenerator,
-)
 
 from custom_components.sax_power import _async_remove_stale_entities
 from custom_components.sax_power.const import (
@@ -24,6 +19,12 @@ from custom_components.sax_power.const import (
 from custom_components.sax_power.dashboard_api import (
     SUBSCRIBE_COMMAND,
     async_register_dashboard_api,
+)
+from tests.ha import (
+    MockConfigEntry,
+    MockHAClientWebSocket,
+    MockUser,
+    WebSocketGenerator,
 )
 
 _MODULE = "custom_components.sax_power.dashboard_api"

@@ -10,8 +10,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 from pymodbus.exceptions import ModbusException
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.sax_power.const import (
     CONF_BRIDGE_CHARGE_ENABLED,
@@ -27,6 +25,7 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.dashboard_tariff import CONFIGURE_COMMAND
+from tests.ha import MockConfigEntry, WebSocketGenerator
 
 from .test_dashboard_tariff_response import _control_clock, _get, _prepare, _toggle
 from .test_month_switch_response import coordinator as coordinator

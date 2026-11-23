@@ -54,7 +54,7 @@ async def test_core_write_error_retains_active_and_inactive_snapshot_for_retry(
     with (
         patch.object(
             store._store,
-            "_write_prepared_data",
+            "_async_write_data",
             side_effect=WriteError("disk temporarily full"),
         ),
         pytest.raises(HomeAssistantError),
@@ -185,7 +185,7 @@ async def test_unchanged_control_cycle_retries_failed_protection_storage(
         await _reach_target_with_pv(coordinator)
     with patch.object(
         store._store,
-        "_write_prepared_data",
+        "_async_write_data",
         side_effect=WriteError("disk temporarily full"),
     ):
         if released:
@@ -215,7 +215,7 @@ async def test_clean_reload_flushes_failed_latest_protection_state(
         await _reach_target_with_pv(coordinator)
     with patch.object(
         store._store,
-        "_write_prepared_data",
+        "_async_write_data",
         side_effect=WriteError("disk temporarily full"),
     ):
         if released:
@@ -290,7 +290,7 @@ async def test_failed_old_shutdown_cannot_overwrite_reloaded_owner(
     old_store = coordinator._timed_discharge_store
     with patch.object(
         old_store._store,
-        "_write_prepared_data",
+        "_async_write_data",
         side_effect=WriteError("disk temporarily full"),
     ):
         await coordinator.async_set_timed_charge_enabled(False)

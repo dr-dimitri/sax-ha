@@ -14,10 +14,6 @@ from homeassistant.components import frontend
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-    async_test_home_assistant,
-)
 
 from custom_components.sax_power import async_setup_entry, async_unload_entry
 from custom_components.sax_power.const import (
@@ -30,6 +26,10 @@ from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.vue_dashboard import (
     VUE_DASHBOARD_ASSET_URL,
     VUE_DASHBOARD_URL_PATH,
+)
+from tests.ha import (
+    MockConfigEntry,
+    async_test_home_assistant,
 )
 
 
@@ -98,7 +98,7 @@ async def test_restart_restores_saved_option_and_bundle_confirmation(
         },
         options={CONF_VUE_DASHBOARD_ENABLED: True},
     )
-    async with async_test_home_assistant() as first:
+    async with async_test_home_assistant(config_dir=str(tmp_path)) as first:
         original.add_to_hass(first)
         with _setup_boundaries(first, original, asset) as first_static:
             try:
@@ -124,7 +124,7 @@ async def test_restart_restores_saved_option_and_bundle_confirmation(
         asset.write_text("// snapshot installed while Home Assistant is stopped\n")
     installed_version = hashlib.sha256(asset.read_bytes()).hexdigest()
 
-    async with async_test_home_assistant() as restarted:
+    async with async_test_home_assistant(config_dir=str(tmp_path)) as restarted:
         try:
             assert restarted is not first
             assert DOMAIN not in restarted.data

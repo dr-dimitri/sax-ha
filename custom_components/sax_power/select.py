@@ -12,7 +12,6 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     DATA_COORDINATOR,
@@ -21,7 +20,7 @@ from .const import (
     PRICE_STRATEGIES,
 )
 from .coordinator import SaxPowerCoordinator
-from .entity import SaxPowerConfigEntity, log_unmigratable_state
+from .entity import SaxPowerRestoreConfigEntity, log_unmigratable_state
 
 
 async def async_setup_entry(
@@ -37,7 +36,7 @@ async def async_setup_entry(
     )
 
 
-class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerConfigEntity, SelectEntity):
+class SaxPowerPriceStrategySelect(SaxPowerRestoreConfigEntity, SelectEntity):
     """Ladestrategie des preisoptimierten Ladens.
 
     - `off`      - Automatik stillgelegt, ohne die übrigen Einstellungen
@@ -68,16 +67,7 @@ class SaxPowerPriceStrategySelect(RestoreEntity, SaxPowerConfigEntity, SelectEnt
         super().__init__(coordinator, entry_id)
         self._assign_ids("select", "price_charge_strategy")
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if (last_state := await self.async_get_last_state()) is not None:
             if last_state.state in PRICE_STRATEGIES:
                 await self.coordinator.async_set_price_charge_strategy(last_state.state)

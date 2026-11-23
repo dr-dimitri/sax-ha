@@ -13,7 +13,6 @@ from homeassistant.components.time import TimeEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -28,7 +27,7 @@ from .const import (
 )
 from .coordinator import SaxPowerCoordinator
 from .entity import (
-    SaxPowerConfigEntity,
+    SaxPowerRestoreConfigEntity,
     initial_config_value,
     log_unmigratable_state,
     restorable_time,
@@ -51,7 +50,7 @@ async def async_setup_entry(
     )
 
 
-class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity):
+class SaxPowerTimedChargeStartTime(SaxPowerRestoreConfigEntity, TimeEntity):
     """Beginn des Zeitfensters für das zeitgesteuerte Laden."""
 
     _attr_translation_key = "timed_charge_start"
@@ -60,16 +59,7 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
         super().__init__(coordinator, entry_id)
         self._assign_ids("time", "timed_charge_start")
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if self.coordinator.timed_charge_start is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -104,7 +94,7 @@ class SaxPowerTimedChargeStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
         self.async_write_ha_state()
 
 
-class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity):
+class SaxPowerTimedChargeEndTime(SaxPowerRestoreConfigEntity, TimeEntity):
     """Ende des Zeitfensters für das zeitgesteuerte Laden."""
 
     _attr_translation_key = "timed_charge_end"
@@ -113,16 +103,7 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
         super().__init__(coordinator, entry_id)
         self._assign_ids("time", "timed_charge_end")
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if self.coordinator.timed_charge_end is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -152,7 +133,7 @@ class SaxPowerTimedChargeEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
         self.async_write_ha_state()
 
 
-class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity):
+class SaxPowerGridServingStartTime(SaxPowerRestoreConfigEntity, TimeEntity):
     """Beginn des Zeitfensters für das netzdienliche Laden.
 
     Darf sich nicht mit dem Zeitfenster des zeitgesteuerten Ladens
@@ -170,16 +151,7 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
         super().__init__(coordinator, entry_id)
         self._assign_ids("time", "grid_serving_start")
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if self.coordinator.grid_serving_start is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -204,7 +176,7 @@ class SaxPowerGridServingStartTime(RestoreEntity, SaxPowerConfigEntity, TimeEnti
         self.async_write_ha_state()
 
 
-class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity):
+class SaxPowerGridServingEndTime(SaxPowerRestoreConfigEntity, TimeEntity):
     """Ende des Zeitfensters für das netzdienliche Laden.
 
     Siehe SaxPowerGridServingStartTime zur Nicht-Überlappungs-Prüfung.
@@ -216,16 +188,7 @@ class SaxPowerGridServingEndTime(RestoreEntity, SaxPowerConfigEntity, TimeEntity
         super().__init__(coordinator, entry_id)
         self._assign_ids("time", "grid_serving_end")
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if self.coordinator.grid_serving_end is not None:
             return
         if (last_state := await self.async_get_last_state()) is not None:

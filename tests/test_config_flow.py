@@ -7,13 +7,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import voluptuous as vol
-import voluptuous_serialize
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.data_entry_flow import FlowManagerIndexView
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import PLATFORMS, config_flow
 from custom_components.sax_power.const import (
@@ -45,6 +43,7 @@ from custom_components.sax_power.const import (
     economics_tou_window_key,
 )
 from custom_components.sax_power.domain.tariff import TariffType
+from tests.ha import MockConfigEntry
 
 VALID_INPUT = {
     "host": "192.168.1.50",
@@ -575,9 +574,9 @@ async def test_dhcp_discovery_deduplicates_repeated_broadcasts(hass) -> None:
     assert second["reason"] == "already_in_progress"
 
 
-async def test_dhcp_discovery_updates_host_for_configured_mac(hass) -> None:
-    """Ein neuer DHCP-Lease derselben MAC führt die IP des vorhandenen
-    Eintrags nach und plant genau einen Reload statt einer Discovery-Karte."""
+@pytest.mark.parametrize("discovery", [False, True], ids=["reconfigure", "dhcp"])
+async def test_host_change_retries_failed_setup(hass, discovery: bool) -> None:
+    """REQ-IP-CONFIGURABLE-UI: Ein korrigierter Host beendet die Retry-Wartezeit."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data=VALID_INPUT,
@@ -585,30 +584,38 @@ async def test_dhcp_discovery_updates_host_for_configured_mac(hass) -> None:
         source=config_entries.SOURCE_DHCP,
     )
     entry.add_to_hass(hass)
-    entry.mock_state(hass, config_entries.ConfigEntryState.LOADED)
+    entry.mock_state(hass, config_entries.ConfigEntryState.SETUP_RETRY)
 
     try:
-        with patch.object(
-            hass.config_entries, "async_schedule_reload"
-        ) as schedule_reload:
-            result = await hass.config_entries.flow.async_init(
-                DOMAIN,
-                context={"source": config_entries.SOURCE_DHCP},
-                data=DhcpServiceInfo(
-                    ip="192.168.1.77",
-                    hostname="sax-1234",
-                    macaddress="aabbccddeeff",
-                ),
-            )
+        with (
+            patch.object(
+                hass.config_entries, "async_schedule_reload"
+            ) as schedule_reload,
+            patch("custom_components.sax_power.config_flow._async_validate_connection"),
+        ):
+            if discovery:
+                result = await hass.config_entries.flow.async_init(
+                    DOMAIN,
+                    context={"source": config_entries.SOURCE_DHCP},
+                    data=DhcpServiceInfo(
+                        ip="192.168.1.77",
+                        hostname="sax-1234",
+                        macaddress="aabbccddeeff",
+                    ),
+                )
+                assert result["reason"] == "already_configured"
+            else:
+                flow = await entry.start_reconfigure_flow(hass)
+                result = await hass.config_entries.flow.async_configure(
+                    flow["flow_id"], {**VALID_INPUT, "host": "192.168.1.77"}
+                )
+                assert result["reason"] == "reconfigure_successful"
 
         assert result["type"] == FlowResultType.ABORT
-        assert result["reason"] == "already_configured"
         assert entry.data["host"] == "192.168.1.77"
         assert entry.unique_id == "aa:bb:cc:dd:ee:ff"
         schedule_reload.assert_called_once_with(entry.entry_id)
     finally:
-        # Der Eintrag ist nur für die Reload-Entscheidung als geladen markiert;
-        # ein echter Setup-Lauf, den das Fixture entladen müsste, fand nicht statt.
         entry.mock_state(hass, config_entries.ConfigEntryState.NOT_LOADED)
 
 
@@ -1363,8 +1370,8 @@ async def test_investment_cost_can_be_removed_without_touching_the_tariff(
 # --------------------------------------------------------------------------
 # Frontend-Serialisierung (Issue #135)
 # --------------------------------------------------------------------------
-# Home Assistant übersetzt jedes Formularschema für das Frontend mit
-# voluptuous_serialize. Scheitert das, fliegt der Fehler erst NACH dem
+# Home Assistant serialisiert jedes Formularschema für das Frontend.
+# Scheitert das, fliegt der Fehler erst NACH dem
 # eigentlichen Flow-Schritt in der Websocket-Schicht - der Dialog zeigt dann
 # nur "Unknown error occurred", und der Schritt ist unerreichbar. Alle
 # übrigen Tests dieser Datei rufen den Flow über die Python-API auf und
@@ -1374,7 +1381,11 @@ async def test_investment_cost_can_be_removed_without_touching_the_tariff(
 
 def _assert_frontend_can_render(schema: vol.Schema) -> None:
     """Schema so übersetzen, wie Home Assistant es fürs Frontend tut."""
-    voluptuous_serialize.convert(schema, custom_serializer=cv.custom_serializer)
+    view = FlowManagerIndexView(MagicMock())
+    result = view._prepare_result_json(
+        {"type": FlowResultType.FORM, "data_schema": schema}
+    )
+    assert isinstance(result["data_schema"], list)
 
 
 def test_every_module_schema_is_serializable() -> None:

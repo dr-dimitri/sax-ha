@@ -363,8 +363,10 @@ requirement_ip_configurable_ui:
     konfigurieren". Das Formular ist mit den aktuell gespeicherten Werten
     vorbelegt. Die neue Verbindung wird vor dem Speichern geprüft
     (derselbe Testread wie bei der Ersteinrichtung); bei Erfolg werden die
-    Werte persistiert (entry.data) und die Integration lädt automatisch mit
-    den neuen Daten neu. Eine Kollisionsprüfung verhindert Duplikate mit
+    Werte persistiert (entry.data). Bei geänderten Verbindungsdaten plant
+    der Update-Listener eines aktiven Eintrags genau einen Reload mit den
+    zuletzt gespeicherten Werten. Reine Options- oder Dashboardänderungen
+    erhalten die laufende Verbindung. Eine Kollisionsprüfung verhindert Duplikate mit
     einem anderen bereits konfigurierten Speicher, ohne beim unveränderten
     Speichern der eigenen IP fälschlich abzubrechen.
 
@@ -401,6 +403,11 @@ requirement_ip_configurable_ui:
        (inkl. Persistierung + Neuladen) als auch fehlgeschlagene
        Validierung (Daten bleiben unverändert) ab; Reconfigure und Options
        bleiben bei vorhandenem Eintrag erreichbar."
+    - "tests/test_integration_live.py prüft Rekonfiguration und DHCP-IP-Wechsel
+       mit zwei lokalen Modbus-TCP-Servern. Nach genau einem Reload zeigt der
+       bestehende SOC-Sensor den Messwert des neuen Hosts. Ein bereits laufender
+       Reload übernimmt die neue IP. Bei einem Wechsel während der Einrichtung
+       startet die Ladeautomatik ausschließlich am neuen Ziel."
     - "tests/test_config_flow.py prüft den frühzeitigen Abbruch einer
        zweiten manuellen Einrichtung für gleiche und abweichende Hosts/Ports
        sowie MAC- und host:port-IDs, ohne Verbindungsvalidierung oder
@@ -4092,8 +4099,9 @@ requirement_vue_parity:
     zugehörigen automatisierten Prüfungen zu. README beschreibt Aktivierung,
     Seitenleisteneintrag, Deaktivierung, Migration und Reparatur; DEVELOPMENT
     beschreibt Architektur, Build und Testausführung. Unterstützter
-    HA-Mindeststand und Testumgebung entsprechen requirements_test.txt
-    und hacs.json; neuere Versionen werden nicht ungeprüft als getestet bezeichnet.
+    HA-Mindeststand ist 2026.8.2. CI führt die vollständige Python-Testsuite
+    einschließlich Einrichtung, Ladebetrieb und Dashboard-HTTP-/WebSocket-Grenzen
+    auf 2026.8.2 und 2026.11.2 mit dem jeweils zugehörigen HA-Frontend aus.
 
     Komponenten- und Produktionsmodultests prüfen die reaktive Oberfläche.
     Chromium-Browsertests verwenden das tatsächlich ausgelieferte Bundle
@@ -4182,8 +4190,10 @@ requirement_vue_dashboard_repair:
     bleiben erneut reparierbar; ein alter Dialog löscht keinen Hinweis für
     einen inzwischen neueren Bundle-Stand.
 
-    Deaktivierte oder entfernte Config Entries werden nicht wieder aktiviert;
-    die Deaktivierung der Integration entfernt den zugehörigen Hinweis. Die
+    Deaktivierte oder entfernte Config Entries werden nicht wieder aktiviert.
+    Ab HA 2026.11 blendet HA den zugehörigen Hinweis bei einer Deaktivierung
+    aus und erhält die Entscheidung „Ignorieren“ über einen Reload. Frühere
+    HA-Versionen entfernen den Dashboardhinweis beim Entladen. Die
     Reparatur verändert keine gespeicherten HA-Dashboards oder Karten.
     Weder Prüfung, Quittierung noch Reparatur lösen Modbus-Schreibvorgänge, Planner-Neustarts
     oder eine neue Tarifrevision aus. Fehler der Oberfläche dürfen
@@ -4419,6 +4429,13 @@ requirement_self_diagnosis_repairs:
   title: "Sechs selbstheilende Diagnose-Basisregeln für still fehlschlagende Konfigurationen"
   status: done
   description: >
+    Ab HA 2026.11 gehören alle SAX-Reparaturmeldungen ihrem Config Entry.
+    HA blendet sie aus, während der Eintrag deaktiviert ist, und entfernt sie
+    beim Löschen des Eintrags. Auch ältere Hinweise ohne gespeicherte
+    Zuordnung werden dann für diesen Eintrag bereinigt. Bei einem Reload
+    bleibt ein ignorierter, weiterhin zutreffender Hinweis ignoriert.
+    Ab HA 2026.8.2 können alle Reparaturen genutzt werden.
+
     repairs.py behandelt den Ladekonflikt zwischen Netzladung und
     preisoptimiertem Laden (ChargeConflictRepairFlow,
     ISSUE_PRICE_CHARGE_CONFLICT/ISSUE_TIMED_CHARGE_CONFLICT). Sechs weitere
@@ -4619,6 +4636,10 @@ requirement_stable_device_identity:
       (entity_platform._async_derive_object_ids) und bleibt dadurch auch
       über eine solche Umbenennung hinweg stabil - unabhängig vom
       Anzeigenamen des Geräts.
+    - Ändert der Anwender gezielt die ID einer Entität, übernimmt Home
+      Assistant ab 2026.11 die neue ID im laufenden Betrieb. Die Entität
+      bleibt angemeldet. Die Integration behält ihre Abonnements,
+      Ladeeinstellungen und Energiezähler auch unter der neuen ID.
 
     Sollte ein künftiger Ersteinrichtungsschritt einen frei wählbaren
     Gerätenamen anbieten, darf dieser ausschließlich den Anzeigenamen
@@ -4637,6 +4658,9 @@ requirement_stable_device_identity:
        bereits vergebene entity_id nicht verändert, auch nicht nach
        async_regenerate_entity_id (dem Mechanismus hinter der
        \"Entity-IDs aktualisieren\"-Option im Umbenennen-Dialog)."
+    - "tests/test_entity.py prüft eine explizite Änderung über die
+       Entity Registry einschließlich Zustandsübernahme und weiterer
+       Aktualisierungen. Ab HA 2026.11 bleibt die Anmeldung dabei bestehen."
 
 # ==============================================================================
 # ANFORDERUNG: NETZWERK-DISCOVERY PER DHCP
@@ -4664,9 +4688,10 @@ requirement_dhcp_discovery:
     dauerhafte Flow- und Config-Entry-unique_id gesetzt. Der gemeinsame
     Verbindungsschritt darf diese ID nicht durch "host:port" ersetzen.
     _abort_if_unique_id_configured aktualisiert bei einem späteren Lease
-    derselben MAC ausschließlich CONF_HOST des vorhandenen Eintrags, plant
-    bei einem geladenen Eintrag genau einen Reload und bricht mit
-    "already_configured" ab. Wiederholte Broadcasts während eines noch
+    derselben MAC ausschließlich CONF_HOST des vorhandenen Eintrags und bricht
+    mit "already_configured" ab. Der Update-Listener plant den Reload des
+    geladenen Eintrags. Wartet der Eintrag auf einen erneuten Setup-Versuch,
+    stößt HA diesen sofort an. Wiederholte Broadcasts während eines noch
     laufenden Flows werden weiterhin als "already_in_progress" dedupliziert.
 
     Erst nach dem Host-/MAC-Abgleich greift die Begrenzung auf einen
@@ -4723,9 +4748,9 @@ requirement_dhcp_discovery:
        \"already_in_progress\" abbricht."
     - "tests/test_config_flow.py deckt den vollständigen DHCP-Setup bis zum
        Config Entry ab und prüft dessen normierte MAC-unique_id."
-    - "tests/test_config_flow.py deckt ab, dass dieselbe MAC mit neuer IP
-       den bestehenden Host aktualisiert, genau einen Reload plant und mit
-       \"already_configured\" abbricht."
+    - "tests/test_config_flow.py prüft die sofortige Wiederholung nach einem
+       fehlgeschlagenen Setup. tests/test_integration_live.py prüft für den
+       geladenen Eintrag den tatsächlichen Wechsel zum neuen Modbus-Host."
     - "tests/test_config_flow.py deckt Reconfigure für MAC- und manuelle
        host:port-IDs ab."
     - "tests/test_config_flow_single_entry.py prüft den Abbruch für eine

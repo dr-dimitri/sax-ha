@@ -32,7 +32,8 @@ Alles läuft im lokalen Netzwerk, ohne Cloud-Konto und ohne YAML-Konfiguration.
 
 ## Voraussetzungen
 
-- **Home Assistant ab 2026.8.2**
+- **Home Assistant ab 2026.8.2**. Die automatisierten Tests laufen mit
+  **2026.8.2** und **2026.11.2**.
 - **SAX Power Home oder Home Plus** mit aktiviertem Modbus TCP, im selben
   Netzwerk wie Home Assistant
 - Für erweiterte Messwerte und Ladefunktionen: kompatible Firmware,

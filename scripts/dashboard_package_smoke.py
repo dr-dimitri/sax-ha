@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -18,9 +19,13 @@ from homeassistant.components import frontend
 from homeassistant.components import repairs as ha_repairs
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import const, vue_dashboard
+
+if find_spec("pytest_homeassistant") is not None:
+    from pytest_homeassistant.common import MockConfigEntry
+else:
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 INSTALLATION_ROOT = Path(__file__).parent.resolve()
 PACKAGE_ROOT = INSTALLATION_ROOT / "custom_components" / "sax_power"

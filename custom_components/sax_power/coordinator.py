@@ -196,6 +196,10 @@ from .infrastructure.energy_store import EnergyState, EnergyStateStore
 from .infrastructure.fixed_time_charge_store import FixedTimeChargeStateStore
 from .infrastructure.pv_bridge_forecast import PvBridgeForecast
 from .infrastructure.pv_forecast_reading import PvForecastReading
+from .infrastructure.repair_issues import (
+    async_create_entry_issue,
+    async_delete_unlinked_issue,
+)
 from .infrastructure.self_diagnostics import DiagnosticSnapshot, SelfDiagnostics
 from .infrastructure.timed_charge_store import TimedChargeStateStore
 from .infrastructure.timed_discharge_store import TimedDischargeStateStore
@@ -3134,12 +3138,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self.slave_id_extended,
                     err,
                 )
-                ir.async_create_issue(
+                async_create_entry_issue(
                     self.hass,
-                    DOMAIN,
+                    self.entry_id,
                     f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}",
-                    is_fixable=False,
-                    severity=ir.IssueSeverity.WARNING,
                     translation_key=ISSUE_EXTENDED_MODE_UNAVAILABLE,
                     translation_placeholders={"slave_id": str(self.slave_id_extended)},
                 )
@@ -3154,10 +3156,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "SunSpec-Modus-Register (Slave-ID %s) wieder erreichbar.",
                 self.slave_id_extended,
             )
+            self._extended_unavailable_since = None
+        if not self._extended_available or self._high_last_read is None:
             ir.async_delete_issue(
                 self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
             )
-            self._extended_unavailable_since = None
         self._extended_available = True
 
         # REQ-SUNSPEC-DATATYPES: Ein dauerhaft defektes Register darf das
@@ -3534,12 +3537,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
         labels = sorted(_CONTROL_FIELD_LABELS.get(field, field) for field in fields)
-        ir.async_create_issue(
+        async_create_entry_issue(
             self.hass,
-            DOMAIN,
+            self.entry_id,
             issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.WARNING,
             translation_key=ISSUE_CONTROL_CONFIG_UNRESOLVED,
             translation_placeholders={"fields": ", ".join(labels)},
         )
@@ -3607,12 +3608,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         werden (siehe _async_schedule_control_save)."""
         issue_id = f"{ISSUE_CONTROL_CONFIG_UNREADABLE}_{self.entry_id}"
         if self._control_store_write_blocked:
-            ir.async_create_issue(
+            async_create_entry_issue(
                 self.hass,
-                DOMAIN,
+                self.entry_id,
                 issue_id,
-                is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
                 translation_key=ISSUE_CONTROL_CONFIG_UNREADABLE,
             )
         else:
@@ -6885,12 +6884,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "abgeschaltet wird - oder der Vorgang abgebrochen werden. Bis "
                 "dahin bleibt die Netzladung ausgeschaltet."
             )
-        ir.async_create_issue(
+        async_create_entry_issue(
             self.hass,
-            DOMAIN,
+            self.entry_id,
             f"{issue_key}_{self.entry_id}",
             is_fixable=True,
-            severity=ir.IssueSeverity.WARNING,
             translation_key=issue_key,
             data={"entry_id": self.entry_id, "issue_key": issue_key},
         )
@@ -7004,6 +7002,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             async with self._sun_charge_write_lock, self._write_lock:
                 self._shutdown_complete = True
             self._clear_sun_charge_active_flags()
-        ir.async_delete_issue(
-            self.hass, DOMAIN, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
+        async_delete_unlinked_issue(
+            self.hass, f"{ISSUE_EXTENDED_MODE_UNAVAILABLE}_{self.entry_id}"
         )

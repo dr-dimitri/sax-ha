@@ -9,7 +9,6 @@ import voluptuous as vol
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import (
     PLATFORMS,
@@ -39,6 +38,7 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from tests.ha import MockConfigEntry
 
 VALID_INPUT = {
     "host": "192.168.1.50",

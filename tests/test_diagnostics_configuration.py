@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
     CONF_BRIDGE_CHARGE_ENABLED,
@@ -40,6 +39,7 @@ from custom_components.sax_power.coordinator import SaxPowerCoordinator, to_unsi
 from custom_components.sax_power.diagnostics import async_get_config_entry_diagnostics
 from custom_components.sax_power.domain.economics_amortization import DayEconomicsResult
 from custom_components.sax_power.infrastructure.control_store import ControlConfig
+from tests.ha import MockConfigEntry
 
 
 def _make_coordinator(

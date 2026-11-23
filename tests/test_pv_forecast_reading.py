@@ -15,7 +15,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.infrastructure.pv_forecast_reading import (
@@ -25,6 +24,7 @@ from custom_components.sax_power.sensor import (
     SENSOR_DESCRIPTIONS,
     SaxPowerChargingForecastSensor,
 )
+from tests.ha import async_fire_time_changed
 
 MODULE = "custom_components.sax_power.infrastructure.pv_forecast_reading"
 SOURCE = "sensor.pv_forecast"

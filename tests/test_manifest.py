@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from importlib.metadata import version
 from importlib.resources import files
 from pathlib import Path
 
@@ -50,7 +51,7 @@ def test_pymodbus_requirement_matches_home_assistant_constraint(
 
 
 def test_hacs_minimum_matches_tested_home_assistant_version() -> None:
-    """HACS must reject every Home Assistant runtime not covered by CI."""
+    """The oldest CI runtime defines the HACS installation minimum."""
     hacs = json.loads((ROOT / "hacs.json").read_text(encoding="utf-8"))
     requirements = (ROOT / "requirements_test.txt").read_text(encoding="utf-8")
     tested_version = next(
@@ -74,14 +75,9 @@ def test_frontend_test_dependency_matches_home_assistant_manifest() -> None:
         for requirement in frontend_manifest["requirements"]
         if requirement.startswith("home-assistant-frontend==")
     )
-    tested_requirements = (ROOT / "requirements_test.txt").read_text(encoding="utf-8")
-    frontend_test_requirements = [
-        line
-        for line in tested_requirements.splitlines()
-        if line.startswith("home-assistant-frontend")
-    ]
-
-    assert frontend_test_requirements == [frontend_requirement]
+    assert Requirement(frontend_requirement).specifier.contains(
+        version("home-assistant-frontend")
+    )
 
 
 def test_dashboard_apis_are_declared_as_optional_after_dependencies(

@@ -16,10 +16,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.recorder import DATA_INSTANCE
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-from pytest_homeassistant_custom_component.components.recorder.common import (
-    async_recorder_block_till_done,
-)
 
 from custom_components.sax_power.const import DOMAIN
 from custom_components.sax_power.infrastructure.price_statistics import (
@@ -27,6 +23,10 @@ from custom_components.sax_power.infrastructure.price_statistics import (
     async_migrate_price_statistics,
 )
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS, SaxPowerSensor
+from tests.ha import (
+    MockConfigEntry,
+    async_recorder_block_till_done,
+)
 
 
 @pytest.fixture

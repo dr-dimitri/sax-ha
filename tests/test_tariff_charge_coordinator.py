@@ -29,6 +29,7 @@ from custom_components.sax_power.time import (
     SaxPowerTimedChargeEndTime,
     SaxPowerTimedChargeStartTime,
 )
+from tests.ha import MockConfigEntry
 
 NOW = datetime(2026, 9, 13, 2, tzinfo=UTC)
 PREFIX = "custom_components.sax_power.coordinator."
@@ -251,6 +252,7 @@ async def test_unused_legacy_overlap_does_not_block_months_or_pause(
 async def test_irrelevant_legacy_repairs_are_hidden_but_preserved(
     coordinator: SaxPowerCoordinator, hass: HomeAssistant
 ) -> None:
+    MockConfigEntry(domain=DOMAIN, entry_id=coordinator.entry_id).add_to_hass(hass)
     coordinator._control_unresolved_fields = {"timed_charge_start", "timed_charge_end"}
     coordinator.reconcile_charge_time_source()
     issue_id = f"{ISSUE_CONTROL_CONFIG_UNRESOLVED}_{coordinator.entry_id}"

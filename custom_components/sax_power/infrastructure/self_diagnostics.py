@@ -23,6 +23,7 @@ from ..const import (
     PRICE_STRATEGY_ABSOLUTE,
     SUNSPEC_PERSISTENTLY_UNAVAILABLE_GRACE_PERIOD,
 )
+from .repair_issues import async_create_entry_issue
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,12 +129,10 @@ class SelfDiagnostics:
             return
         if issue_id in self._active_issue_ids:
             return
-        ir.async_create_issue(
+        async_create_entry_issue(
             self._hass,
-            DOMAIN,
+            self._entry_id,
             issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.WARNING,
             translation_key=translation_key,
             translation_placeholders=translation_placeholders,
         )

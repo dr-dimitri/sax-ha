@@ -337,12 +337,11 @@ HA-Installation wird dadurch nicht behauptet.
 
 ## Build-, Browser- und Paketprüfungen
 
-Die Testbasis ist **Home Assistant 2026.8.2**,
-**home-assistant-frontend 20260729.7**, **Python 3.14**. Die verbindlichen Pins
-stehen in [requirements_test.txt](../requirements_test.txt), der HA-Mindeststand
-in [hacs.json](../hacs.json). CI verwendet diese Versionen. Neue HA-Versionen
-benötigen insbesondere bei Änderungen an Recorder-/Frontend-APIs einen erneuten
-Funktionslauf; sie werden hier nicht pauschal als geprüft bezeichnet.
+CI prüft die HA-Anbindung mit Python 3.14 in zwei getrennten Umgebungen.
+Die HACS-Mindestversion **2026.8.2** verwendet Frontend **20260729.7**.
+Für **2026.11.2** wird Frontend **20261028.6** installiert.
+Die Paketversionen stehen in [requirements_test.txt](../requirements_test.txt)
+und [requirements_test_2026_11.txt](../requirements_test_2026_11.txt).
 
 | Prüfung | Umfang und Ausführung |
 | --- | --- |

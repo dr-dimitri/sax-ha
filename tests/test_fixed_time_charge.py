@@ -48,6 +48,7 @@ from custom_components.sax_power.infrastructure.fixed_time_charge_store import (
     FixedTimeChargeStateStore,
 )
 from custom_components.sax_power.price_optimizer import PricePlan
+from tests.ha import MockConfigEntry
 
 BERLIN = ZoneInfo("Europe/Berlin")
 ENTRY_ID = "fixed_time_charge"
@@ -483,6 +484,7 @@ async def test_dynamic_restore_preserves_irrelevant_legacy_windows(
 async def test_fixed_diagnostics_ignore_threshold_but_still_report_empty_months(
     hass: HomeAssistant, tariff: TariffType
 ) -> None:
+    MockConfigEntry(domain=DOMAIN, entry_id=ENTRY_ID).add_to_hass(hass)
     coordinator = _coordinator(hass, tariff=tariff, minimum=70)
     coordinator._timed_charge_max_soc = 40
     coordinator._timed_charge_months = set()

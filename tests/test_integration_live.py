@@ -15,19 +15,22 @@ Home Plus. Siehe anforderung.yaml, REQ-SUNSPEC-MODE-CORRECTION.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import STATE_UNKNOWN
+import pytest_socket
+from homeassistant.config_entries import SOURCE_DHCP, ConfigEntry, ConfigEntryState
+from homeassistant.const import STATE_UNKNOWN, Platform
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from homeassistant.util import dt as dt_util
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.server import ModbusTcpServer
 from pymodbus.simulator import DataType, SimData, SimDevice
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
     ALL_MONTHS,
@@ -46,13 +49,18 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
     SUN_IC_CONTROL_MODE_SMARTMETER,
 )
-from custom_components.sax_power.coordinator import to_signed16, to_unsigned16
+from custom_components.sax_power.coordinator import (
+    SaxPowerCoordinator,
+    to_signed16,
+    to_unsigned16,
+)
 from custom_components.sax_power.infrastructure.control_store import (
     STORAGE_KEY_PREFIX as CONTROL_STORAGE_KEY_PREFIX,
 )
 from custom_components.sax_power.infrastructure.control_store import (
     STORAGE_VERSION as CONTROL_STORAGE_VERSION,
 )
+from tests.ha import MockConfigEntry
 
 SLAVE_ID_BASIC = 64
 SLAVE_ID_EXTENDED = 100
@@ -70,6 +78,8 @@ def _modbus_server(
     port: int,
     basic_registers: list[int],
     extended_registers: list[int] | None,
+    *,
+    host: str = "127.0.0.1",
 ) -> ModbusTcpServer:
     """Create a TCP simulator with the supported SimDevice API."""
     devices = [
@@ -93,7 +103,7 @@ def _modbus_server(
                 ),
             )
         )
-    return ModbusTcpServer(devices, address=("127.0.0.1", port))
+    return ModbusTcpServer(devices, address=(host, port))
 
 
 def _build_basic_registers(**overrides: int) -> list[int]:
@@ -230,6 +240,137 @@ def _entity_id(registry: er.EntityRegistry, entry_id: str, suffix: str) -> str:
 
 def _state_float(hass, entity_id: str) -> float:
     return float(hass.states.get(entity_id).state)
+
+
+@pytest.fixture
+async def changing_host_entry(
+    hass: HomeAssistant, socket_enabled: None, unused_tcp_port: int
+) -> AsyncIterator[MockConfigEntry]:
+    """Zwei Loopback-Adressen mit demselben Port liefern unterscheidbare SOC-Werte."""
+    old_host, new_host = "::1", "127.0.0.1"
+    pytest_socket.socket_allow_hosts([old_host, new_host])
+    old_server = _modbus_server(
+        unused_tcp_port,
+        _build_basic_registers(),
+        _build_extended_registers(),
+        host=old_host,
+    )
+    registers = _build_basic_registers()
+    registers[46] = 72
+    new_server = _modbus_server(
+        unused_tcp_port, registers, _build_extended_registers(), host=new_host
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            "host": old_host,
+            "port": unused_tcp_port,
+            "slave_id_basic": SLAVE_ID_BASIC,
+            "slave_id_extended": SLAVE_ID_EXTENDED,
+            "scan_interval": 3600,
+        },
+        unique_id="aa:bb:cc:dd:ee:ff",
+    )
+    entry.add_to_hass(hass)
+    await old_server.serve_forever(background=True)
+    try:
+        await new_server.serve_forever(background=True)
+        yield entry
+    finally:
+        if entry.state is ConfigEntryState.LOADED:
+            await hass.config_entries.async_unload(entry.entry_id)
+        await new_server.shutdown()
+        await old_server.shutdown()
+
+
+async def _discover_new_host(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": SOURCE_DHCP},
+        data=DhcpServiceInfo(
+            ip="127.0.0.1", hostname="sax-1234", macaddress="aabbccddeeff"
+        ),
+    )
+    assert result["reason"] == "already_configured"
+
+
+@pytest.mark.parametrize("discovery", [False, True], ids=["reconfigure", "dhcp"])
+async def test_ip_change_reconnects_once(
+    hass: HomeAssistant,
+    changing_host_entry: MockConfigEntry,
+    caplog: pytest.LogCaptureFixture,
+    discovery: bool,
+) -> None:
+    """REQ-DHCP-DISCOVERY / REQ-IP-CONFIGURABLE-UI: Der neue Host liefert den SOC."""
+    entry = changing_host_entry
+    connection = entry.data
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    soc_id = _entity_id(er.async_get(hass), entry.entry_id, "soc")
+    assert _state_float(hass, soc_id) == 55
+
+    with patch.object(
+        hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+    ) as reload_entry:
+        if discovery:
+            await _discover_new_host(hass)
+        else:
+            flow = await entry.start_reconfigure_flow(hass)
+            result = await hass.config_entries.flow.async_configure(
+                flow["flow_id"], {**connection, "host": "127.0.0.1"}
+            )
+            assert result["reason"] == "reconfigure_successful"
+        await hass.async_block_till_done()
+        reload_entry.assert_awaited_once_with(entry.entry_id)
+    assert entry.data["host"] == "127.0.0.1"
+    assert _state_float(hass, soc_id) == 72
+    assert "should use it for scheduling a reload" not in caplog.text
+
+
+@pytest.mark.parametrize("during_setup", [True, False], ids=["setup", "unload"])
+async def test_ip_change_during_entry_transition(
+    hass: HomeAssistant, changing_host_entry: MockConfigEntry, during_setup: bool
+) -> None:
+    """REQ-DHCP-DISCOVERY: Ein laufender Aufbau übernimmt nur das aktuelle Ziel."""
+    entry = changing_host_entry
+    if not during_setup:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    transition = (
+        "async_forward_entry_setups" if during_setup else "async_unload_platforms"
+    )
+    original_transition = getattr(hass.config_entries, transition)
+
+    async def change_host(entry: ConfigEntry, platforms: list[Platform]) -> bool | None:
+        if entry.data["host"] == "::1":
+            await _discover_new_host(hass)
+        return await original_transition(entry, platforms)
+
+    with (
+        patch.object(hass.config_entries, transition, side_effect=change_host),
+        patch.object(
+            hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+        ) as reload_entry,
+        patch.object(
+            SaxPowerCoordinator,
+            "async_finish_bootstrap",
+            autospec=True,
+            side_effect=SaxPowerCoordinator.async_finish_bootstrap,
+        ) as bootstrap,
+    ):
+        if during_setup:
+            await hass.config_entries.async_setup(entry.entry_id)
+        else:
+            await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        reload_entry.assert_awaited_once_with(entry.entry_id)
+        bootstrap.assert_awaited_once_with(
+            hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+        )
+    assert entry.state is ConfigEntryState.LOADED
+    assert (
+        _state_float(hass, _entity_id(er.async_get(hass), entry.entry_id, "soc")) == 72
+    )
 
 
 async def test_live_modbus_end_to_end(hass, socket_enabled) -> None:

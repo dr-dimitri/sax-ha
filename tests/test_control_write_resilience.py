@@ -23,6 +23,7 @@ from custom_components.sax_power.const import (
     REG_SUN_IC_POWER_SETPOINT_PCT,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from tests.ha import MockConfigEntry
 
 
 def _read_response(
@@ -39,6 +40,9 @@ def _read_response(
 
 @pytest.fixture
 async def coordinator(hass: HomeAssistant) -> AsyncIterator[SaxPowerCoordinator]:
+    MockConfigEntry(domain=DOMAIN, entry_id="control_write_resilience").add_to_hass(
+        hass
+    )
     client = MagicMock()
     client.connected = True
     client.read_holding_registers = AsyncMock(side_effect=_read_response)

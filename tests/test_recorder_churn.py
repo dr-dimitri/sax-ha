@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -31,6 +30,7 @@ from custom_components.sax_power.domain.tariff import (
     QuoteSource,
     QuoteUnavailable,
 )
+from tests.ha import MockConfigEntry
 
 STARTED = datetime(2026, 9, 11, 12, tzinfo=UTC)
 CLOCK = "custom_components.sax_power.coordinator.monotonic"

@@ -8,10 +8,9 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     ALL_MONTHS,
@@ -34,6 +33,7 @@ from .domain.tariff import TariffType
 from .entity import (
     SaxPowerConfigEntity,
     SaxPowerEntity,
+    SaxPowerRestoreConfigEntity,
     initial_config_value,
     log_unmigratable_state,
     restorable_bool,
@@ -107,7 +107,7 @@ class SaxPowerStorageSwitch(SaxPowerEntity, SwitchEntity):
         await self.coordinator.async_refresh()
 
 
-class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
+class SaxPowerTimedChargeSwitch(SaxPowerRestoreConfigEntity, SwitchEntity):
     """Aktiviert/deaktiviert das zeitgesteuerte Laden (Software-Logik).
 
     Siehe SaxPowerCoordinator._async_enforce_grid_charge sowie die
@@ -121,16 +121,7 @@ class SaxPowerTimedChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         super().__init__(coordinator, entry_id)
         self._assign_ids("switch", "timed_charge_enabled")
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if self.coordinator.timed_charge_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -192,6 +183,11 @@ class SaxPowerBridgeChargeSwitch(SaxPowerConfigEntity, SwitchEntity):
             self._entry.add_update_listener(self._async_options_updated)
         )
 
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Der Optionslistener ist am Config Entry registriert."""
+        super().async_entity_id_changed(old_entity_id)
+
     async def _async_options_updated(
         self, hass: HomeAssistant, entry: ConfigEntry
     ) -> None:
@@ -235,7 +231,7 @@ class SaxPowerBridgeChargeSwitch(SaxPowerConfigEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
+class SaxPowerGridServingSwitch(SaxPowerRestoreConfigEntity, SwitchEntity):
     """Aktiviert/deaktiviert das netzdienliche Laden (Software-Logik).
 
     Lädt - anders als "Netzladung aktiv" - ausschließlich mit PV-Überschuss,
@@ -251,16 +247,7 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         super().__init__(coordinator, entry_id)
         self._assign_ids("switch", "grid_serving_enabled")
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if self.coordinator.grid_serving_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:
@@ -291,7 +278,7 @@ class SaxPowerGridServingSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         self.async_write_ha_state()
 
 
-class SaxPowerMonthSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
+class SaxPowerMonthSwitch(SaxPowerRestoreConfigEntity, SwitchEntity):
     """Legt fest, ob Netzladung bzw. netzdienliches Laden in einem
     bestimmten Kalendermonat überhaupt wirksam sein dürfen (siehe
     anforderung.yaml, REQ-GRID-SERVING-CHARGE) - z. B. Netzladung nur
@@ -331,16 +318,7 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
         self._attr_translation_key = translation_key
         self._assign_ids("switch", translation_key)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if (last_state := await self.async_get_last_state()) is not None:
             if (restored := restorable_bool(last_state)) is None:
                 # Ohne diese Prüfung würde ein "unavailable" gewordener
@@ -368,7 +346,7 @@ class SaxPowerMonthSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntity):
+class SaxPowerPriceChargeSwitch(SaxPowerRestoreConfigEntity, SwitchEntity):
     """Hauptschalter für das preisoptimierte Laden (Software-Logik).
 
     Lädt den Speicher aus dem Netz, wenn der Strompreis günstig ist - nach
@@ -391,16 +369,7 @@ class SaxPowerPriceChargeSwitch(RestoreEntity, SaxPowerConfigEntity, SwitchEntit
         super().__init__(coordinator, entry_id)
         self._assign_ids("switch", "price_charge_enabled")
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if not self.coordinator.control_config_migration_pending:
-            # REQ-CONTROL-CONFIG-BOOTSTRAP: Es gibt bereits einen Store -
-            # entweder hat er den Wert gesetzt, oder er war nicht lesbar und
-            # es gelten sichere Defaults. In beiden Fällen darf ein
-            # veralteter Entity-Zustand nicht einspringen; der
-            # RestoreEntity-Pfad unten ist nur der einmalige Migrationsweg
-            # für Einträge ganz ohne Store.
-            return
+    async def _async_restore_control_value(self) -> None:
         if self.coordinator.price_charge_enabled:
             return
         if (last_state := await self.async_get_last_state()) is not None:

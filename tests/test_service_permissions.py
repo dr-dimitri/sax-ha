@@ -14,12 +14,11 @@ from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, Unauthorized, UnknownUser
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
-from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.sax_power import _async_register_services
 from custom_components.sax_power.const import DATA_COORDINATOR, DOMAIN
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from tests.ha import MockConfigEntry, MockUser, WebSocketGenerator, mock_device_registry
 
 from .test_month_switch_response import coordinator as coordinator
 
@@ -226,12 +225,20 @@ async def test_services_resolve_device_without_deprecated_config_entries(
             identifiers={("other_integration", "battery")},
         )
         device_id = "pre_migration_device_id"
-        for split_id in (foreign_device.id, service_device.device_id):
-            registry.devices[split_id] = attr.evolve(
-                registry.async_get(split_id),
-                composite_device_id=device_id,
-                composite_primary_config_entry=foreign_entry.entry_id,
-            )
+        mock_device_registry(
+            hass,
+            {
+                split.id: attr.evolve(
+                    split,
+                    composite_device_id=device_id,
+                    composite_primary_config_entry=foreign_entry.entry_id,
+                )
+                for split in (
+                    foreign_device,
+                    registry.async_get(service_device.device_id),
+                )
+            },
+        )
 
     await hass.async_block_till_done()
     with patch.object(

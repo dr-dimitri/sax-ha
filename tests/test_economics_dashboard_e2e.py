@@ -20,8 +20,6 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -35,6 +33,7 @@ from custom_components.sax_power.dashboard_api import async_register_dashboard_a
 from custom_components.sax_power.dashboard_tariff import GET_COMMAND, SAVE_COMMAND
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS
+from tests.ha import MockConfigEntry, WebSocketGenerator
 
 from .energy_samples import accumulate_economics_interval, accumulate_energy_samples
 

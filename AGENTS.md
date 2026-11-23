@@ -24,7 +24,7 @@ Always talk in german to the user
 - Home Assistant custom component (`custom_components/sax_power/`):
   `DataUpdateCoordinator` + `SensorEntity`/`NumberEntity`/`SwitchEntity`/
   `TimeEntity` platforms, GUI-only `config_flow.py` (no YAML configuration).
-- Tests: `pytest` + `pytest-homeassistant-custom-component`, `ruff`, `black`
+- Tests: `pytest` with the HA fixtures for each tested Core release, `ruff`, `black`
   (line length 88, see `pyproject.toml`).
 
 ## Setup / test / lint commands
@@ -46,6 +46,9 @@ Inside `.devcontainer/` (see `devcontainer.json`), `homeassistant`, `pytest`,
 `ruff`, `black` are already installed - run the same commands directly,
 no venv activation needed. A local Home Assistant instance is available via
 `hass -c config` (port 8123).
+
+CI runs the full Python suite on HA 2026.8.2 and 2026.11.2. For the latter,
+install `requirements_test_2026_11.txt` in a separate Python 3.14 venv.
 
 `tests/test_real_hardware.py` needs a real device (`tests/real_device.yaml`
 with a `host` entry); it's skipped automatically otherwise - that's expected,

@@ -53,6 +53,7 @@ from custom_components.sax_power.switch import (
     SaxPowerTimedChargeSwitch,
 )
 from custom_components.sax_power.time import SaxPowerTimedChargeStartTime
+from tests.ha import MockConfigEntry
 
 ACTIVE_WINDOW_PAYLOAD = {
     "max_soc": 90,
@@ -629,6 +630,7 @@ async def test_unreadable_store_neither_migrates_nor_gets_overwritten(
     veralteter Entity-Zustand einspringen, noch darf der vorhandene Store
     automatisch durch die Vorgabewerte ersetzt werden - er kann die einzige
     Kopie der richtigen Konfiguration sein."""
+    MockConfigEntry(domain=DOMAIN, entry_id="entry").add_to_hass(hass)
     _seed_store(hass_storage, "entry", ACTIVE_WINDOW_PAYLOAD)
     original = dict(hass_storage[f"{STORAGE_KEY_PREFIX}.entry"])
     client = _make_client()
@@ -1136,6 +1138,7 @@ async def test_unresolved_fields_issue_lifecycle(hass, hass_storage) -> None:
     """Sinnvoller Repair-Hinweis (siehe Review): angelegt, solange
     mindestens ein Feld unresolved ist, gelöscht sobald keins mehr übrig
     ist."""
+    MockConfigEntry(domain=DOMAIN, entry_id="entry").add_to_hass(hass)
     coordinator = _make_coordinator(hass, _make_client(), "entry")
     await coordinator.async_load_control_state()
     entity = SaxPowerTimedChargeMinSocNumber(coordinator, "entry")

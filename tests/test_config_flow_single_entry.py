@@ -10,9 +10,9 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import CONF_PRICE_SENSOR, DOMAIN
+from tests.ha import MockConfigEntry
 
 CONNECTION_DATA = {
     "host": "192.168.1.50",

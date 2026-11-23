@@ -12,7 +12,6 @@ import pytest
 from homeassistant import config_entries
 from homeassistant.components import frontend, websocket_api
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import (
     _async_rollback_failed_setup,
@@ -37,6 +36,7 @@ from custom_components.sax_power.vue_dashboard import (
     async_sync_vue_dashboard,
     async_unload_vue_dashboard,
 )
+from tests.ha import MockConfigEntry
 
 _MODULE = "custom_components.sax_power.vue_dashboard"
 
@@ -355,6 +355,7 @@ async def test_integration_setup_and_unload_manage_optional_panel(
 ) -> None:
     """Ein Frontendfehler lässt Setup, Bootstrap und regulären Unload funktionsfähig."""
     coordinator = MagicMock(spec=SaxPowerCoordinator)
+    coordinator.options = dict(vue_entry.options)
     coordinator.price_planner = MagicMock()
     coordinator.price_planner.async_load_cycle_state = AsyncMock()
     coordinator.pv_forecast_reading = MagicMock()

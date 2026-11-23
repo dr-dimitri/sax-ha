@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant.config_entries import (
     SOURCE_DHCP,
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -322,7 +323,9 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         self._async_abort_entries_match({CONF_HOST: discovery_info.ip})
 
         await self.async_set_unique_id(format_mac(discovery_info.macaddress))
-        self._abort_if_unique_id_configured(updates={CONF_HOST: discovery_info.ip})
+        self._abort_if_unique_id_configured(
+            updates={CONF_HOST: discovery_info.ip}, reload_on_update=False
+        )
 
         self._discovered_ip = discovery_info.ip
         self.context["title_placeholders"] = {"host": discovery_info.ip}
@@ -400,11 +403,24 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                             updated_data[dashboard_key] = reconfigure_entry.data[
                                 dashboard_key
                             ]
-                    return self.async_update_reload_and_abort(
+                    result = self.async_update_and_abort(
                         reconfigure_entry,
                         data=updated_data,
                         unique_id=unique_id,
                     )
+                    # Nach fehlgeschlagenem Setup fehlt der laufende Update-Listener.
+                    if reconfigure_entry.disabled_by is None and (
+                        reconfigure_entry.state
+                        in (
+                            ConfigEntryState.SETUP_RETRY,
+                            ConfigEntryState.SETUP_ERROR,
+                            ConfigEntryState.NOT_LOADED,
+                        )
+                    ):
+                        self.hass.config_entries.async_schedule_reload(
+                            reconfigure_entry.entry_id
+                        )
+                    return result
                 # Ersteinrichtung: Verbindungsdaten merken und weiter zum
                 # optionalen Netzladung-Schritt, bevor der Eintrag angelegt
                 # wird (siehe async_step_grid_charge).

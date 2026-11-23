@@ -14,7 +14,6 @@ from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 from homeassistant.util.file import WriteError
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.sax_power.const import PRICE_STRATEGY_RELATIVE
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
@@ -25,6 +24,7 @@ from custom_components.sax_power.infrastructure.price_plan_store import (
     PricePlanInterval,
 )
 from custom_components.sax_power.price_optimizer import PriceChargeContext, PriceSlot
+from tests.ha import async_fire_time_changed
 
 NOW = datetime(2026, 9, 14, 12, tzinfo=UTC)
 
@@ -87,7 +87,7 @@ async def test_failed_initial_cycle_write_retries_without_replanning(
     planner._compute_budgeted_plan(NOW, slots, context)
     store = planner._cycle_store
     with patch.object(
-        store._store, "_write_prepared_data", side_effect=WriteError("disk full")
+        store._store, "_async_write_data", side_effect=WriteError("disk full")
     ):
         await _elapse_save_delay(hass)
 
@@ -122,7 +122,7 @@ async def test_failed_immediate_write_keeps_previous_snapshot_and_retries(
     await store.async_save(_cycle(3))
     with (
         patch.object(
-            store._store, "_write_prepared_data", side_effect=WriteError("disk full")
+            store._store, "_async_write_data", side_effect=WriteError("disk full")
         ),
         pytest.raises(HomeAssistantError),
     ):
@@ -199,7 +199,7 @@ async def test_failed_unload_does_not_retry_over_a_reloaded_entry(
     planner._set_cycle_state(_cycle(3))
     old_store = planner._cycle_store
     with patch.object(
-        old_store._store, "_write_prepared_data", side_effect=WriteError("disk full")
+        old_store._store, "_async_write_data", side_effect=WriteError("disk full")
     ):
         await coordinator.async_shutdown(reset_device=False)
     assert old_store._unsub_delayed_write is None
@@ -255,7 +255,7 @@ async def test_failed_disabled_cycle_write_cannot_resurrect_old_budget(
     await store.async_save(_cycle(3))
     store.async_delay_save(None)
     with patch.object(
-        store._store, "_write_prepared_data", side_effect=WriteError("disk full")
+        store._store, "_async_write_data", side_effect=WriteError("disk full")
     ):
         await _elapse_save_delay(hass)
     await _elapse_save_delay(hass)

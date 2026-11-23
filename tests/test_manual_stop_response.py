@@ -12,8 +12,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from pymodbus.exceptions import ModbusException
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.sax_power import _async_register_services
 from custom_components.sax_power.const import (
@@ -27,6 +25,7 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SMARTMETER,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from tests.ha import MockConfigEntry, WebSocketGenerator
 
 
 @pytest.fixture

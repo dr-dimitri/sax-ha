@@ -7,7 +7,6 @@ from copy import deepcopy
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.const import (
     CONF_DASHBOARD_TARIFF_PROFILES,
@@ -20,6 +19,7 @@ from custom_components.sax_power.const import (
     DOMAIN,
     ECONOMICS_TOU_WINDOW_KEYS,
 )
+from tests.ha import MockConfigEntry
 
 PROFILE = {
     CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,

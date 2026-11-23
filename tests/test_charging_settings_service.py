@@ -20,7 +20,6 @@ from homeassistant.exceptions import (
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pymodbus.exceptions import ModbusException
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 
 from custom_components.sax_power import _async_register_services
 from custom_components.sax_power.const import (
@@ -31,6 +30,7 @@ from custom_components.sax_power.const import (
     SUN_IC_CONTROL_MODE_SETPOINT,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from tests.ha import MockConfigEntry, MockUser
 
 from .test_month_switch_response import coordinator as coordinator
 

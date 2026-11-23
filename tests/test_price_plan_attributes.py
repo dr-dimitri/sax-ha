@@ -8,11 +8,6 @@ import pytest
 from homeassistant.components.recorder.db_schema import StateAttributes
 from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import (
-    MockConfigEntry,
-    MockEntityPlatform,
-    async_capture_events,
-)
 
 from custom_components.sax_power.const import (
     CONF_PRICE_SENSOR,
@@ -25,6 +20,11 @@ from custom_components.sax_power.const import (
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.price_optimizer import PricePlan, SaxPricePlanner
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS, SaxPowerSensor
+from tests.ha import (
+    MockConfigEntry,
+    MockEntityPlatform,
+    async_capture_events,
+)
 
 NOW = datetime(2024, 1, 15, 12, tzinfo=UTC)
 

@@ -13,8 +13,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -31,6 +29,7 @@ from custom_components.sax_power.const import (
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.dashboard_api import async_register_dashboard_api
 from custom_components.sax_power.dashboard_tariff import CONFIGURE_COMMAND, GET_COMMAND
+from tests.ha import MockConfigEntry, WebSocketGenerator
 
 from .test_month_switch_response import coordinator as coordinator
 

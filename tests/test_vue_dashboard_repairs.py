@@ -13,7 +13,6 @@ from homeassistant import config_entries
 from homeassistant.components import frontend, repairs
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import async_update_options
 from custom_components.sax_power.const import (
@@ -30,6 +29,7 @@ from custom_components.sax_power.vue_dashboard import (
     async_sync_vue_dashboard,
     async_unload_vue_dashboard,
 )
+from tests.ha import MockConfigEntry
 
 _MODULE = "custom_components.sax_power.vue_dashboard"
 
@@ -232,6 +232,9 @@ async def test_removed_or_disabled_entry_cannot_be_reactivated_by_old_repair(
     """Alte Dialoge reaktivieren keine entfernten oder abgeschalteten Einträge."""
     assert await async_sync_vue_dashboard(hass, entry)
     manager, flow_id = await _flow(hass, entry)
+    issue = _issue(hass, entry)
+    assert issue is not None
+    ir.async_ignore_issue(hass, DOMAIN, issue.issue_id, True)
     await async_unload_vue_dashboard(hass, entry)
     if removed:
         await hass.config_entries.async_remove(entry.entry_id)
@@ -242,7 +245,13 @@ async def test_removed_or_disabled_entry_cannot_be_reactivated_by_old_repair(
     result = await manager.async_configure(flow_id, {"next_step_id": "confirm"})
     assert result["type"] == "abort" and result["reason"] == "no_longer_available"
     assert not frontend.async_panel_exists(hass, VUE_DASHBOARD_URL_PATH)
-    assert _issue(hass, entry) is None
+    if not removed and hasattr(ir.IssueEntry, "config_entry_id"):
+        retained = _issue(hass, entry)
+        assert retained is not None and retained.config_entry_id == entry.entry_id
+        assert retained.dismissed_version is not None
+        assert ir.async_get(hass).async_is_hidden(retained)
+    else:
+        assert _issue(hass, entry) is None
 
 
 @pytest.mark.parametrize("setup_result", [False, True])

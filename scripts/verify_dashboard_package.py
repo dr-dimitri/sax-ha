@@ -123,6 +123,8 @@ def verify_dashboard_package(archive: Path) -> DashboardPackageReport:
                 "-I",
                 "-m",
                 "pytest",
+                "-p",
+                "no:respx",
                 str(worker),
                 "--confcutdir",
                 str(isolated_root),

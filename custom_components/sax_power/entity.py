@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import math
+from abc import abstractmethod
 from datetime import time as dt_time
 from typing import Any
 
 from homeassistant.const import STATE_OFF, STATE_ON
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
@@ -134,3 +136,23 @@ class SaxPowerConfigEntity(SaxPowerEntity):
     @property
     def available(self) -> bool:
         return True
+
+
+class SaxPowerRestoreConfigEntity(RestoreEntity, SaxPowerConfigEntity):
+    """Migriert Ladeeinstellungen einmalig aus dem früheren Entitätszustand."""
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        # REQ-CONTROL-CONFIG-BOOTSTRAP: Ein vorhandener, auch beschädigter
+        # Store hat Vorrang vor veralteten Zuständen der einzelnen Entitäten.
+        if self.coordinator.control_config_migration_pending:
+            await self._async_restore_control_value()
+
+    @abstractmethod
+    async def _async_restore_control_value(self) -> None:
+        """Lade den Altzustand oder den Startwert dieser Einstellung."""
+
+    @callback
+    def async_entity_id_changed(self, old_entity_id: str) -> None:
+        """Ladeeinstellungen gehören zum Config Entry (REQ-STABLE-DEVICE-IDENTITY)."""
+        super().async_entity_id_changed(old_entity_id)

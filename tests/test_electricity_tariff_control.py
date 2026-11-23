@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.application.charge_policy import (
     tariff_automation_controls,
@@ -21,6 +20,7 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.domain.tariff import TariffType
+from tests.ha import MockConfigEntry
 
 
 def _options(kind: str) -> dict[str, Any]:

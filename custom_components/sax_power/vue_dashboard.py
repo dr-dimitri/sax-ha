@@ -23,6 +23,10 @@ from .const import (
     ISSUE_VUE_DASHBOARD_UPDATE,
 )
 from .dashboard_api import async_register_dashboard_api
+from .infrastructure.repair_issues import (
+    async_create_entry_issue,
+    async_delete_unlinked_issue,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,7 +91,7 @@ def _update_issue(
 ) -> None:
     """Ein bereits definiertes Custom Element braucht einen Browser-Reload."""
     if not vue_dashboard_available(hass, entry):
-        ir.async_delete_issue(hass, DOMAIN, _issue_id(entry))
+        async_delete_unlinked_issue(hass, _issue_id(entry))
         return
     token = f"failed:{version}" if failed else version
     if initialize and not failed and entry.data.get(CONF_VUE_DASHBOARD_VERSION) == "":
@@ -99,12 +103,11 @@ def _update_issue(
     ):
         ir.async_delete_issue(hass, DOMAIN, _issue_id(entry))
         return
-    ir.async_create_issue(
+    async_create_entry_issue(
         hass,
-        DOMAIN,
+        entry.entry_id,
         _issue_id(entry),
         is_fixable=True,
-        severity=ir.IssueSeverity.WARNING,
         translation_key=ISSUE_VUE_DASHBOARD_UPDATE,
         data={
             "entry_id": entry.entry_id,
@@ -131,7 +134,7 @@ async def async_sync_vue_dashboard(
 ) -> bool:
     """Registriere das integrierte Dashboard, ohne das Batterie-Setup zu blockieren."""
     if _DATA_RUNTIME not in hass.data and not _enabled(entry):
-        ir.async_delete_issue(hass, DOMAIN, _issue_id(entry))
+        async_delete_unlinked_issue(hass, _issue_id(entry))
         return not force
 
     runtime = hass.data.setdefault(_DATA_RUNTIME, _PanelRuntime())
@@ -139,7 +142,7 @@ async def async_sync_vue_dashboard(
         # Zwischen zwei Options-Updates kann ein asynchrones Frontend-Setup
         # liegen; entscheidend ist der zuletzt gespeicherte Zustand.
         if not _enabled(entry):
-            ir.async_delete_issue(hass, DOMAIN, _issue_id(entry))
+            async_delete_unlinked_issue(hass, _issue_id(entry))
             if runtime.entry_id == entry.entry_id:
                 removed = _remove_owned_panel(hass, runtime)
                 return removed and not force
@@ -284,7 +287,7 @@ async def async_finish_vue_dashboard_repair(
 
 async def async_unload_vue_dashboard(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Entferne ausschließlich das zu diesem Config Entry gehörende Panel."""
-    ir.async_delete_issue(hass, DOMAIN, _issue_id(entry))
+    async_delete_unlinked_issue(hass, _issue_id(entry))
     runtime = hass.data.get(_DATA_RUNTIME)
     if runtime is None:
         return

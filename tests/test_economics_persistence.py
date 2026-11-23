@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -39,6 +38,7 @@ from custom_components.sax_power.infrastructure.economics_store import (
     EconomicsState,
     EconomicsStateStore,
 )
+from tests.ha import async_fire_time_changed
 
 from .energy_samples import accumulate_economics_interval
 

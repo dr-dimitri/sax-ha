@@ -10,7 +10,6 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power import async_update_options
 from custom_components.sax_power.const import (
@@ -23,6 +22,7 @@ from custom_components.sax_power.const import (
     ECONOMICS_TOU_WINDOW_KEYS,
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
+from tests.ha import MockConfigEntry
 
 from .energy_samples import accumulate_energy_sample
 

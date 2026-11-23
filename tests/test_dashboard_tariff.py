@@ -9,11 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
-from pytest_homeassistant_custom_component.typing import (
-    MockHAClientWebSocket,
-    WebSocketGenerator,
-)
 
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -29,6 +24,12 @@ from custom_components.sax_power.dashboard_tariff import (
     GET_COMMAND,
     SAVE_COMMAND,
     websocket_save_tariff,
+)
+from tests.ha import (
+    MockConfigEntry,
+    MockHAClientWebSocket,
+    MockUser,
+    WebSocketGenerator,
 )
 
 

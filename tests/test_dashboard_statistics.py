@@ -18,18 +18,17 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.recorder import DATA_INSTANCE
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
-from pytest_homeassistant_custom_component.components.recorder.common import (
-    async_recorder_block_till_done,
-)
-from pytest_homeassistant_custom_component.typing import (
-    MockHAClientWebSocket,
-    WebSocketGenerator,
-)
 
 from custom_components.sax_power.const import DOMAIN
 from custom_components.sax_power.dashboard_api import async_register_dashboard_api
 from custom_components.sax_power.dashboard_statistics import STATISTICS_COMMAND
+from tests.ha import (
+    MockConfigEntry,
+    MockHAClientWebSocket,
+    MockUser,
+    WebSocketGenerator,
+    async_recorder_block_till_done,
+)
 
 _MODULE = "custom_components.sax_power.dashboard_statistics"
 _ZONE = ZoneInfo("Europe/Berlin")

@@ -11,7 +11,6 @@ import pytest
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sax_power.config_flow import STEP_OPTIONS_SCHEMA
 from custom_components.sax_power.const import (
@@ -27,6 +26,7 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.domain.tariff import TariffType
 from custom_components.sax_power.sensor import SENSOR_DESCRIPTIONS, SaxPowerSensor
+from tests.ha import MockConfigEntry
 
 BRIDGE_FIELDS = (CONF_BRIDGE_CHARGE_ENABLED,)
 BRIDGE_STATES = (

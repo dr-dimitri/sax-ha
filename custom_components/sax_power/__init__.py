@@ -8,7 +8,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.auth.permissions.const import CAT_ENTITIES, POLICY_CONTROL
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import (
@@ -46,6 +46,7 @@ from .const import (
     CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
     DATA_COORDINATOR,
+    DEFAULT_PORT,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
     DEFAULT_SCAN_INTERVAL,
@@ -64,6 +65,7 @@ from .const import (
 from .coordinator import SaxPowerCoordinator
 from .domain.tariff import TariffType
 from .infrastructure.modbus_framing import SaxModbusPacketTrace
+from .infrastructure.repair_issues import async_delete_unlinked_issue
 from .vue_dashboard import async_sync_vue_dashboard, async_unload_vue_dashboard
 
 _LOGGER = logging.getLogger(__name__)
@@ -228,16 +230,42 @@ def _async_remove_legacy_dashboard_metadata(
     ir.async_delete_issue(hass, DOMAIN, f"dashboard_outdated_{entry.entry_id}")
 
 
+def _connection_settings(entry: ConfigEntry) -> tuple[str, int, int, int, int]:
+    return (
+        entry.data[CONF_HOST],
+        entry.data.get(CONF_PORT, DEFAULT_PORT),
+        entry.data[CONF_SLAVE_ID_BASIC],
+        entry.data.get(CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED),
+        entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up SAX Power from a config entry."""
     _async_remove_legacy_dashboard_metadata(hass, entry)
     _async_remove_stale_entities(hass, entry)
+    connection_settings = _connection_settings(entry)
+    host, port, slave_id, slave_id_extended, scan_interval = connection_settings
+    reload_scheduled = False
+    bootstrap_complete = False
+
+    async def async_entry_updated(hass: HomeAssistant, updated: ConfigEntry) -> None:
+        nonlocal reload_scheduled
+        if reload_scheduled or updated.state is ConfigEntryState.UNLOAD_IN_PROGRESS:
+            return
+        if _connection_settings(updated) != connection_settings:
+            # REQ-DHCP-DISCOVERY: Auch vor dem Unload eintreffende Änderungen
+            # werden vom nächsten Setup mit den jüngsten Daten übernommen.
+            reload_scheduled = True
+            hass.config_entries.async_schedule_reload(updated.entry_id)
+        elif bootstrap_complete:
+            await async_update_options(hass, updated)
+
+    entry.async_on_unload(entry.add_update_listener(async_entry_updated))
     client = AsyncModbusTcpClient(
-        host=entry.data[CONF_HOST],
-        port=entry.data.get(CONF_PORT, 502),
-        trace_packet=SaxModbusPacketTrace(
-            entry.data.get(CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED)
-        ),
+        host=host,
+        port=port,
+        trace_packet=SaxModbusPacketTrace(slave_id_extended),
     )
     coordinator: SaxPowerCoordinator | None = None
     try:
@@ -245,21 +273,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             connected = await client.connect()
         except OSError as err:
             raise ConfigEntryNotReady(
-                f"Kann nicht mit {entry.data[CONF_HOST]} verbinden: {err}"
+                f"Kann nicht mit {host} verbinden: {err}"
             ) from err
         if not connected:
-            raise ConfigEntryNotReady(
-                f"Kann nicht mit {entry.data[CONF_HOST]} verbinden"
-            )
+            raise ConfigEntryNotReady(f"Kann nicht mit {host} verbinden")
 
         coordinator = SaxPowerCoordinator(
             hass,
             client,
-            slave_id=entry.data[CONF_SLAVE_ID_BASIC],
-            slave_id_extended=entry.data.get(
-                CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED
-            ),
-            scan_interval=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+            slave_id=slave_id,
+            slave_id_extended=slave_id_extended,
+            scan_interval=scan_interval,
             entry_id=entry.entry_id,
             options=entry.options,
         )
@@ -313,11 +337,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # vollständig, und genau eine Ladeentscheidung wird angewendet - statt
         # während des Entity-Setups eine Kette von Teilkonfigurationen
         # (REQ-CONTROL-CONFIG-BOOTSTRAP).
+        await async_entry_updated(hass, entry)
+        if reload_scheduled:
+            # REQ-SETUP-ROLLBACK: Am überholten Host keine Ladeautomatik starten.
+            raise ConfigEntryNotReady("Verbindungsdaten während des Aufbaus geändert")
         await coordinator.async_finish_bootstrap()
-        entry.async_on_unload(entry.add_update_listener(async_update_options))
+        bootstrap_complete = True
 
         _async_register_services(hass)
-        await async_sync_vue_dashboard(hass, entry)
+        await async_entry_updated(hass, entry)
     except BaseException:
         await _async_rollback_failed_setup(
             hass, entry, client, coordinator, platforms_started=True
@@ -410,10 +438,9 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     Der Options Flow betrifft Quell-Sensoren und deren Interpretation im
     price_optimizer.SaxPricePlanner sowie die optionale Vue-Oberfläche - nie
-    den Modbus-Client, die Slave-IDs oder das Scan-Intervall (unveränderlich
-    in entry.data, siehe config_flow.async_step_reconfigure für deren einzigen
-    Änderungsweg). Die separate Heute-Prognose kann dabei die Freigabe des
-    netzdienlichen Ladens ändern. Ein Reload ist für eine reine
+    den Modbus-Client, die Slave-IDs oder das Scan-Intervall. Die separate
+    Heute-Prognose kann dabei die Freigabe des netzdienlichen Ladens ändern.
+    Ein Reload ist für eine reine
     Options-Änderung trotzdem nicht nötig: Die neuen Werte werden direkt in
     den laufenden Coordinator übernommen, der Planner wird erneut aufgesetzt
     und das Ergebnis sofort angewendet -
@@ -460,6 +487,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_shutdown()
         coordinator.client.close()
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Bereinige auch ältere Hinweise, die HA keinem Config Entry zuordnen kann."""
+    for domain, issue_id in list(ir.async_get(hass).issues):
+        if domain == DOMAIN and issue_id.endswith(f"_{entry.entry_id}"):
+            async_delete_unlinked_issue(hass, issue_id)
 
 
 def _entry_id_for_device(hass: HomeAssistant, device_id: str) -> str:

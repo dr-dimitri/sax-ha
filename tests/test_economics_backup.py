@@ -15,13 +15,13 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.sax_power.infrastructure.economics_store import (
     ECONOMICS_BACKUP_INTERVAL,
     EconomicsState,
     EconomicsStateStore,
 )
+from tests.ha import async_fire_time_changed
 
 
 @pytest.fixture

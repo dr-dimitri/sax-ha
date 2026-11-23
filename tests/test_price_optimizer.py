@@ -73,6 +73,7 @@ from custom_components.sax_power.price_optimizer import (
 from custom_components.sax_power.repairs import async_create_fix_flow
 from custom_components.sax_power.select import SaxPowerPriceStrategySelect
 from custom_components.sax_power.switch import SaxPowerPriceChargeSwitch
+from tests.ha import MockConfigEntry
 
 
 def _local(hour: int, minute: int = 0, day: int = 15) -> datetime:
@@ -920,6 +921,8 @@ def _make_client() -> MagicMock:
 
 
 def _make_coordinator(hass, client: MagicMock | None = None) -> SaxPowerCoordinator:
+    if hass.config_entries.async_get_entry("test_entry_id") is None:
+        MockConfigEntry(domain=DOMAIN, entry_id="test_entry_id").add_to_hass(hass)
     coordinator = SaxPowerCoordinator(
         hass,
         client or _make_client(),

@@ -278,6 +278,8 @@ def _entry_values(
                 )
                 if end is not None:
                     break
+        if end is None and any(entry.get(key) is not None for key in _END_KEYS):
+            return start, None, None
         price = None
         for key in _PRICE_KEYS:
             if key in entry:
@@ -354,11 +356,11 @@ def _finalize_slots(
     seen: set[tuple[datetime, datetime, float]] = set()
     for index, start_instant in enumerate(instants):
         for start, end, price in by_start[start_instant]:
-            # Unreadable prices still bound their predecessor. Conflicting
+            # Invalid entries still bound their predecessor. Conflicting
             # duplicates must survive so consumers can mark ambiguous coverage.
-            if price is None:
+            if price is None or (end is not None and _instant(end) <= start_instant):
                 continue
-            if end is None or _instant(end) <= start_instant:
+            if end is None:
                 if index + 1 < len(instants):
                     end = by_start[instants[index + 1]][0][0]
                 else:

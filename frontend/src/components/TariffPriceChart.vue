@@ -52,13 +52,11 @@ onMounted(() => {
 });
 onBeforeUnmount(() => observer?.disconnect());
 const chart = computed(() => tariffChart(props.series, width.value));
-const selected = ref<number | null>(null);
-const missing = ref(false);
+const inspectedAt = ref<number | null>(null);
 watch(
-  () => props.series,
+  () => props.series?.start,
   () => {
-    selected.value = null;
-    missing.value = false;
+    inspectedAt.value = null;
   },
 );
 const number = (value: unknown) =>
@@ -93,9 +91,13 @@ const time = (value: string, detail = false) =>
       : ({ timeStyle: "short" } as const)),
     timeZone: props.series?.time_zone,
   }) ?? "—";
-const selection = computed(() =>
-  selected.value === null ? null : chart.value.slots[selected.value],
-);
+const selectedIndex = computed(() => {
+  const at = inspectedAt.value;
+  return at === null
+    ? -1
+    : chart.value.slots.findIndex((slot) => at >= slot.from && at < slot.to);
+});
+const selection = computed(() => chart.value.slots[selectedIndex.value]);
 const now = computed(() => Date.parse(props.series?.now ?? ""));
 const nowVisible = computed(
   () => now.value >= chart.value.start && now.value < chart.value.end,
@@ -109,15 +111,10 @@ function inspect(event: PointerEvent) {
   const target = event.currentTarget as SVGElement;
   const bounds = target.getBoundingClientRect();
   const graphX = ((event.clientX - bounds.left) / bounds.width) * width.value;
-  const at =
+  inspectedAt.value =
     chart.value.start +
     ((graphX - 48) / (width.value - 60)) *
       (chart.value.end - chart.value.start);
-  const index = chart.value.slots.findIndex(
-    (slot) => at >= slot.from && at < slot.to,
-  );
-  selected.value = index < 0 ? null : index;
-  missing.value = index < 0;
 }
 function move(event: KeyboardEvent) {
   if (
@@ -126,8 +123,7 @@ function move(event: KeyboardEvent) {
   )
     return;
   event.preventDefault();
-  missing.value = false;
-  selected.value =
+  const nextIndex =
     event.key === "Home"
       ? 0
       : event.key === "End"
@@ -136,14 +132,15 @@ function move(event: KeyboardEvent) {
             0,
             Math.min(
               chart.value.slots.length - 1,
-              (selected.value ?? -1) + (event.key === "ArrowRight" ? 1 : -1),
+              selectedIndex.value + (event.key === "ArrowRight" ? 1 : -1),
             ),
           );
+  inspectedAt.value = chart.value.slots[nextIndex]!.from;
 }
 </script>
 <template>
   <div ref="container" class="tariff-price-chart" :aria-busy="loading">
-    <p v-if="loading" role="status">{{ text.loading }}</p>
+    <p v-if="loading && !series" role="status">{{ text.loading }}</p>
     <div
       v-else-if="!chart.slots.length"
       class="tariff-price-chart__empty"
@@ -222,7 +219,7 @@ function move(event: KeyboardEvent) {
         {{
           selection
             ? `${time(selection.start, true)}–${time(selection.end, true)} · ${number(selection.price_ct_kwh)} ct/kWh`
-            : missing
+            : inspectedAt !== null
               ? text.gap
               : text.hint
         }}

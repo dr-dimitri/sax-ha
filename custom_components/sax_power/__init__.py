@@ -37,6 +37,7 @@ from .const import (
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_METER_POSITIVE_IMPORT,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
     CONF_SCAN_INTERVAL,
@@ -230,13 +231,16 @@ def _async_remove_legacy_dashboard_metadata(
     ir.async_delete_issue(hass, DOMAIN, f"dashboard_outdated_{entry.entry_id}")
 
 
-def _connection_settings(entry: ConfigEntry) -> tuple[str, int, int, int, int]:
+def modbus_connection_settings(
+    data: Mapping[str, Any],
+) -> tuple[str, int, int, int, int]:
+    """Effektive Verbindungsdaten, einschließlich der Defaults älterer Einträge."""
     return (
-        entry.data[CONF_HOST],
-        entry.data.get(CONF_PORT, DEFAULT_PORT),
-        entry.data[CONF_SLAVE_ID_BASIC],
-        entry.data.get(CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED),
-        entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        data[CONF_HOST],
+        data.get(CONF_PORT, DEFAULT_PORT),
+        data[CONF_SLAVE_ID_BASIC],
+        data.get(CONF_SLAVE_ID_EXTENDED, DEFAULT_SLAVE_ID_EXTENDED),
+        data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
     )
 
 
@@ -244,7 +248,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up SAX Power from a config entry."""
     _async_remove_legacy_dashboard_metadata(hass, entry)
     _async_remove_stale_entities(hass, entry)
-    connection_settings = _connection_settings(entry)
+    connection_settings = modbus_connection_settings(entry.data)
+    meter_positive_import = entry.data.get(CONF_METER_POSITIVE_IMPORT, False)
     host, port, slave_id, slave_id_extended, scan_interval = connection_settings
     reload_scheduled = False
     bootstrap_complete = False
@@ -253,7 +258,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         nonlocal reload_scheduled
         if reload_scheduled or updated.state is ConfigEntryState.UNLOAD_IN_PROGRESS:
             return
-        if _connection_settings(updated) != connection_settings:
+        if (
+            modbus_connection_settings(updated.data) != connection_settings
+            or updated.data.get(CONF_METER_POSITIVE_IMPORT, False)
+            != meter_positive_import
+        ):
             # REQ-DHCP-DISCOVERY: Auch vor dem Unload eintreffende Änderungen
             # werden vom nächsten Setup mit den jüngsten Daten übernommen.
             reload_scheduled = True
@@ -286,6 +295,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             scan_interval=scan_interval,
             entry_id=entry.entry_id,
             options=entry.options,
+            meter_positive_import=meter_positive_import,
         )
         await coordinator.async_load_calibration_state()
         await coordinator.async_load_energy_state()

@@ -25,6 +25,7 @@ from custom_components.sax_power.const import (
     CONF_ECONOMICS_WINDOW_PRICE,
     CONF_ECONOMICS_WINDOW_START,
     CONF_GRID_SERVING_PV_FORECAST_SENSOR,
+    CONF_METER_POSITIVE_IMPORT,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
     CONF_PV_FORECAST_FACTOR,
@@ -109,7 +110,8 @@ def test_connection_schema_rejects_invalid_protocol_address(
         config_flow.STEP_CONNECTION_SCHEMA({**VALID_INPUT, field: value})
 
 
-async def test_user_flow_success(hass) -> None:
+@pytest.mark.parametrize("meter_positive_import", [False, True])
+async def test_user_flow_success(hass, meter_positive_import: bool) -> None:
     """Ersteinrichtung: Nach erfolgreicher Verbindungsvalidierung folgt der
     zweite, optionale Schritt "grid_charge" - wird er unverändert (leer)
     abgeschickt, gelten die Hard-Defaults aus const.py (deaktiviert,
@@ -144,8 +146,11 @@ async def test_user_flow_success(hass) -> None:
         assert result["type"] == FlowResultType.FORM
         assert result["step_id"] == "user"
 
+        connection = VALID_INPUT.copy()
+        if meter_positive_import:
+            connection[CONF_METER_POSITIVE_IMPORT] = True
         result2 = await hass.config_entries.flow.async_configure(
-            result["flow_id"], VALID_INPUT
+            result["flow_id"], connection
         )
         assert result2["type"] == FlowResultType.FORM
         assert result2["step_id"] == "grid_charge"
@@ -159,6 +164,7 @@ async def test_user_flow_success(hass) -> None:
         assert result4["type"] == FlowResultType.CREATE_ENTRY
         assert result4["title"] == "SAX Power Home"
         assert result4["data"]["host"] == "192.168.1.50"
+        assert result4["data"][CONF_METER_POSITIVE_IMPORT] is meter_positive_import
         assert result4["data"]["timed_charge_enabled"] is False
         assert result4["data"]["timed_charge_start"] == "00:00:00"
         assert result4["data"]["timed_charge_end"] == "00:05:00"

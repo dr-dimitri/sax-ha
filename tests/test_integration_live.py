@@ -34,6 +34,7 @@ from pymodbus.simulator import DataType, SimData, SimDevice
 
 from custom_components.sax_power.const import (
     ALL_MONTHS,
+    CONF_METER_POSITIVE_IMPORT,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
     DATA_COORDINATOR,
@@ -240,6 +241,70 @@ def _entity_id(registry: er.EntityRegistry, entry_id: str, suffix: str) -> str:
 
 def _state_float(hass, entity_id: str) -> float:
     return float(hass.states.get(entity_id).state)
+
+
+async def test_reconfigure_positive_import_meter_updates_energy_accounting(
+    hass: HomeAssistant, socket_enabled: None, unused_tcp_port: int
+) -> None:
+    """REQ-SUNSPEC-MODE-CORRECTION: ADW200-Netzladung verbucht Bezug statt Export."""
+    registers = _build_extended_registers()
+    registers[29] = -3600
+    registers[72:76] = [12370, 4120, 4120, 4130]
+    server = _modbus_server(unused_tcp_port, _build_basic_registers(), registers)
+    await server.serve_forever(background=True)
+    connection = {
+        "host": "127.0.0.1",
+        "port": unused_tcp_port,
+        "slave_id_basic": SLAVE_ID_BASIC,
+        "slave_id_extended": SLAVE_ID_EXTENDED,
+        "scan_interval": 10,
+    }
+    entry = MockConfigEntry(domain=DOMAIN, data=connection)
+    entry.add_to_hass(hass)
+    try:
+        with patch(
+            "custom_components.sax_power.coordinator.monotonic", return_value=100
+        ) as clock:
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+            old = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+            meter = _entity_id(er.async_get(hass), entry.entry_id, "smartmeter_power")
+            assert _state_float(hass, meter) == -12370
+            clock.return_value = 102
+            await old.async_refresh()
+            assert old._timed_charge_pv_surplus_cycles >= 2
+            exported = old.data["energy_exported_to_grid"]
+            assert exported > 0 and old.data["energy_imported_from_grid"] == 0
+
+            flow = await entry.start_reconfigure_flow(hass)
+            with patch(
+                "custom_components.sax_power.config_flow._async_validate_connection"
+            ) as probe:
+                async with old._charge_control_lock:
+                    async with asyncio.timeout(2):
+                        result = await hass.config_entries.flow.async_configure(
+                            flow["flow_id"],
+                            {**connection, CONF_METER_POSITIVE_IMPORT: True},
+                        )
+                probe.assert_not_awaited()
+            assert result["reason"] == "reconfigure_successful"
+            await hass.async_block_till_done()
+            current = hass.data[DOMAIN][entry.entry_id][DATA_COORDINATOR]
+            assert current is not old
+            assert _state_float(hass, meter) == 12370
+            assert current.data["energy_exported_to_grid"] == exported
+            previous_pv = current.data["energy_charged_from_pv"]
+            clock.return_value = 104
+            await current.async_refresh()
+            assert current.data["energy_imported_from_grid"] == pytest.approx(0.007)
+            assert current.data["energy_exported_to_grid"] == exported
+            assert current.data["energy_charged_from_grid"] == pytest.approx(0.002)
+            assert current.data["energy_charged_from_pv"] == previous_pv
+            assert current._timed_charge_pv_surplus_cycles == 0
+    finally:
+        if entry.state is ConfigEntryState.LOADED:
+            await hass.config_entries.async_unload(entry.entry_id)
+        await server.shutdown()
 
 
 @pytest.fixture

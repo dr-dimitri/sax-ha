@@ -363,7 +363,9 @@ requirement_ip_configurable_ui:
     konfigurieren". Das Formular ist mit den aktuell gespeicherten Werten
     vorbelegt. Die neue Verbindung wird vor dem Speichern geprüft
     (derselbe Testread wie bei der Ersteinrichtung); bei Erfolg werden die
-    Werte persistiert (entry.data). Bei geänderten Verbindungsdaten plant
+    Werte persistiert (entry.data). Eine reine Änderung der Vorzeichenkonvention
+    des Zählers (REQ-SUNSPEC-MODE-CORRECTION) wird ohne Testread angenommen.
+    Bei geänderten Verbindungsdaten oder geänderter Zählerkonvention plant
     der Update-Listener eines aktiven Eintrags genau einen Reload mit den
     zuletzt gespeicherten Werten. Reine Options- oder Dashboardänderungen
     erhalten die laufende Verbindung. Eine Kollisionsprüfung verhindert Duplikate mit
@@ -551,19 +553,22 @@ requirement_sunspec_mode_correction:
 
     Vorzeichenkonvention von data["smartmeter_power"] (Standarddarstellung,
     nicht offiziell in modbus.pdf dokumentiert): NEGATIV = Einspeisung ins
-    Netz (PV-Überschuss), POSITIV = Netzbezug. Das Rohregister selbst meldet
-    das umgekehrte Vorzeichen (positiv bei Einspeisung) -
-    domain.sunspec.decode_high_block negiert deshalb den skalierten Wert
-    (ScaledField.negate) vor der Ablage in data["smartmeter_power"]; der Sensor "Netzleistung"
-    (sensor.py) bleibt dabei ein reiner Durchreicher (_direct) und zeigt
-    damit direkt den bereits negierten Wert. Alle Vergleiche gegen
+    Netz (PV-Überschuss), POSITIV = Netzbezug. Standardmäßig meldet das
+    Rohregister Einspeisung positiv (beim ADL400 beobachtet). Für Zähler
+    mit positiv gemeldetem Bezug (bei ADW200 beobachtet) ist bei Einrichtung
+    und Neukonfiguration "Positiver Zählerwert bedeutet Netzbezug" wählbar.
+    Alte Einträge ohne diese Einstellung verwenden weiterhin den Standard.
+    domain.sunspec.decode_high_block normalisiert die skalierten Werte
+    bereits vor der Ablage in data; Sensoren, Energiezählung und
+    Ladesteuerung nutzen dieselben Werte. Die Umstellung übernimmt vorhandene
+    Energiezähler und beginnt mit einer frischen Messung. Alle Vergleiche gegen
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py) - PV-Überschuss-Prüfung
     und Netzbezug-Freigabe-Trigger der Max-SOC-Sperre in REQ-TIMED-SOC-
     CHARGE, Schritt b der Zustandsmaschine in REQ-GRID-SERVING-CHARGE sowie
     die Neutralpreis-Pausezone in REQ-DYNAMIC-PRICE-CHARGE - sind an diese
     Konvention angepasst.
 
-    Dieselbe Negation gilt für die drei Phasenwerte data["grid_power_active_
+    Dieselbe Normalisierung gilt für die drei Phasenwerte data["grid_power_active_
     l1"/"_l2"/"_l3"] (Register 40073-40075, "Netzleistung L1/L2/L3") - sie
     teilen sich denselben Registerblock und damit dasselbe rohe Vorzeichen
     wie Register 40072, ihre Summe muss weiterhin data["smartmeter_power"]
@@ -603,11 +608,11 @@ requirement_sunspec_mode_correction:
        positive Entlade-, negative Lade-, Null- und unbekannte Werte."
     - "README.md und die Sensortabellen verwenden die aktuellen
        Sensor-Keys."
-    - "tests/test_coordinator.py deckt die Vorzeichenkonvention von
-       data[\"smartmeter_power\"] ab: ein positiver Rohregisterwert (via
-       apply_typed_sunssf) ergibt einen negativen data-Wert (Einspeisung) und
-       umgekehrt. tests/test_integration_live.py verifiziert denselben
-       negierten Wert end-to-end am Sensorzustand."
+    - "tests/test_sunspec_decoder.py prüft beide Richtungen für die Summe
+       und die Phasen einschließlich Null- und Sentinelwerten.
+       tests/test_integration_live.py prüft die Neukonfiguration eines
+       Bestandseintrags sowie den Sensorzustand und die Energiezählung
+       bei nächtlicher Netzladung mit positiv gemeldetem Bezug."
 
 # ==============================================================================
 # ANFORDERUNG: SUNSPEC-DATENTYPEN UND NOT-IMPLEMENTED-SENTINELS
@@ -1194,10 +1199,9 @@ requirement_timed_soc_charge:
     (Standarddarstellung, nicht offiziell in modbus.pdf dokumentiert, siehe
     REQ-SUNSPEC-MODE-CORRECTION): ein NEGATIVER Anzeigewert bedeutet
     Überschuss aus der Dachphotovoltaik (Einspeisung ins Netz), ein
-    POSITIVER Anzeigewert Netzbezug; der rohe Registerinhalt meldet dagegen
-    das umgekehrte Vorzeichen, weshalb domain.sunspec.decode_high_block
-    den skalierten Wert beim Einlesen negiert (nicht sensor.py - der Sensor
-    bleibt ein reiner Durchreicher, siehe _direct). Ist der Wert (noch)
+    POSITIVER Anzeigewert Netzbezug. domain.sunspec.decode_high_block
+    berücksichtigt beim Einlesen die konfigurierte Zählerkonvention.
+    Ist der Wert (noch)
     nicht verfügbar (z. B. SunSpec-Modus nicht erreichbar), blockiert das
     die Netzladung nicht. Der Schwellwert
     SMARTMETER_PV_SURPLUS_THRESHOLD_WATT (const.py) ist bewusst als eigene,
@@ -2474,8 +2478,10 @@ requirement_diagnostics:
     coordinator_data bewahrt Messwerte, Gerätefehler, Firmware und veröffentlichte
     Ladepläne. Dazu gehört battery_capacity als geräteseitig skalierte
     Gesamtkapazität in Wh; ohne bestätigten Wert steht dort null.
-    state und charge_control ergänzen Bootstrap, SOC-Sperren,
-    Kalibrierung, Messwertalter und gültige Aktualitätsregeln, laufende Writer,
+    state enthält die für die aktuelle Messung wirksame Vorzeichenkonvention
+    des Zählers (meter_positive_import). state und charge_control ergänzen
+    Bootstrap, SOC-Sperren, Kalibrierung, Messwertalter und gültige
+    Aktualitätsregeln, laufende Writer,
     gesperrte Steuerpfade, Sollwert und Fristen, Tarifrevisionen, fenstergebundene
     Ladefreigaben, Entladeschutz und netzdienliche Zustandszähler. Die Daten
     werden ausschließlich gelesen: kein Modbus-/Serviceaufruf, keine
@@ -2526,9 +2532,12 @@ requirement_dynamic_price_charge:
     UTC-Zeitpunkte ausgewertet; beide Herbststunden bleiben getrennt.
     EUR/MWh wird über die ausgewählte Preis-Einheit in EUR/kWh umgerechnet.
 
-    Einträge mit ungültigem Preis behalten ihren lesbaren Startzeitpunkt
-    als Grenze des vorherigen Slots ohne explizites Ende. Eine Preislücke
-    darf deshalb niemals den vorherigen günstigen Preis verlängern.
+    Fehlt die Endzeit oder ist sie null, darf die Slotdauer aus den
+    benachbarten Startzeiten abgeleitet werden. Ein explizites Ende muss
+    lesbar sein und zeitlich nach dem Start liegen. Einträge mit ungültigem
+    Ende oder Preis behalten ihren lesbaren Startzeitpunkt als Grenze des
+    vorherigen Slots ohne explizites Ende. Für die entstehende Preislücke
+    gibt es weder eine Ladefreigabe noch eine Tarifbewertung.
     Bei mehrfach vorhandenem Startzeitpunkt gewinnt der erste gültige
     Preis; eine bloße Grenze ohne Preis darf diesen nicht verdrängen.
     Ungültige Kalenderdaten und nicht endliche numerische Zeitstempel
@@ -3893,6 +3902,17 @@ requirement_vue_electricity_tariff:
     zum angefragten Tarif, seiner Revision und dem angezeigten Tag passen. Das
     vom Server gelieferte lokale Tagesdatum bleibt auch bei abweichender
     Browserzeitzone unverändert; wiederholte Stunden zeigen ihre UTC-Offsets.
+    Aktualisiert sich derselbe Tagesverlauf, bleiben die aufgeklappte
+    Preistabelle, der Tastaturfokus und der zur Ansicht ausgewählte Zeitpunkt
+    erhalten. Die Preisdetails folgen den neuen Intervallen auch bei veränderten
+    Preisen oder Lücken. Beim Wechsel auf einen anderen Tag oder Tarif zeigt
+    das Dashboard dessen Datum und Kurve erst mit der zugehörigen Antwort.
+    Der erste Abruf nach Mitternacht richtet sich nach Serverzeit und
+    HA-Tagesgrenzen. Er entfernt abgelaufene Kurven auch bei verzögerter Antwort.
+    Bei einem Verbindungswechsel oder verschwundener Preisquelle werden die
+    bisherigen Kurvendaten bis zur erneuten Bestätigung ausgeblendet. Das
+    gilt auch, wenn die dynamische Preisquelle unknown, unavailable oder einen
+    leeren Zustand meldet.
 
     sax_power/dashboard/tariff/series liefert die vollständige Preisabdeckung
     für heute, bei dynamischen Tarifen auch morgen, unabhängig von ausgewählten
@@ -4472,8 +4492,11 @@ requirement_self_diagnosis_repairs:
     _async_check_self_diagnostics wird am Ende jedes _async_update_data-
     Zyklus aufgerufen (nach _publish_charge_state) und läuft damit bei jedem
     Poll-Tick - jede der sechs Einzelprüfungen legt ihr Issue aber nur auf
-    einer Zustandsflanke an, statt es bei jedem Aufruf neu anzulegen.
-    SelfDiagnostics._sync_issue merkt sich dafür lokal die aktiven Issue-IDs.
+    einer Zustandsflanke an. Ändern sich bei fortbestehendem Fehler die
+    Preisquelle oder angezeigte Schwellenwerte, aktualisiert sie den
+    bestehenden Hinweis beim nächsten Prüfen. Erstellzeit und die Entscheidung
+    „Ignorieren“ bleiben erhalten. SelfDiagnostics._sync_issue merkt sich
+    dafür die zuletzt gemeldeten Platzhalter je aktiver Issue-ID.
     Beim Löschen prüft der gemeinsame Helfer zusätzlich die echte
     Issue-Registry: Deren Issues überleben das Neuladen eines Config Entry,
     während der lokale Zustand der neuen SelfDiagnostics-Instanz leer ist.

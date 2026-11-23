@@ -68,6 +68,7 @@ Verbindungswerte kannst du normalerweise übernehmen:
 | Slave-ID, Basic Mode | 64 |
 | Slave-ID, SunSpec-Modus | 100 |
 | Aktualisierungsintervall der grundlegenden Messwerte | 10 Sekunden |
+| Positiver Zählerwert bedeutet Netzbezug | Aus |
 
 Die Verbindung wird vor dem Speichern geprüft. Im Anschluss kannst du die
 zeitgesteuerte Netzladung vorbelegen und die Einrichtung abschließen.
@@ -86,6 +87,14 @@ Hat der Speicher eine neue IP-Adresse, wähle beim bestehenden
 Integrationseintrag **Neu konfigurieren**. Dort lassen sich auch Port,
 Slave-IDs und Aktualisierungsintervall ändern. Nach erfolgreicher Prüfung
 lädt Home Assistant die Integration neu.
+
+Zeigt die SAX-App bei eindeutigem Netzbezug (etwa während einer nächtlichen
+Netzladung) Bezug an, während der Sensor **Netzleistung** Einspeisung meldet,
+aktiviere unter **Neu konfigurieren** die Option **Positiver Zählerwert
+bedeutet Netzbezug**. Bei manchen ADW200-Installationen meldet der Zähler
+Netzbezug mit diesem Vorzeichen. Nach dem Speichern verwenden Netzleistung,
+Phasenwerte, Ladesteuerung und die weitere Energiezählung die gewählte
+Richtung. Bereits gezählte Energiemengen bleiben erhalten.
 
 ## Dashboard
 

@@ -331,6 +331,7 @@ const chargingSettings = ref<{
 const chargingSaving = ref(false);
 let disposed = false;
 let seriesRequest = 0;
+let seriesExpiresAt = 0;
 onBeforeUnmount(() => {
   disposed = true;
   seriesRequest++;
@@ -512,6 +513,16 @@ async function loadSeries() {
   const requestedTariff = active.value;
   const requestedRevision = profile.value?.revision;
   const requestedDay = day.value;
+  const requestedAt = Date.now();
+  const matchesRequest = (value: TariffPriceSeries) =>
+    value.tariff_type === requestedTariff &&
+    value.revision === requestedRevision &&
+    value.day === requestedDay;
+  if (
+    series.value &&
+    (!matchesRequest(series.value) || requestedAt >= seriesExpiresAt)
+  )
+    series.value = null;
   seriesLoading.value = true;
   try {
     const result = await dashboard.loadTariffSeries(requestedDay);
@@ -521,13 +532,14 @@ async function loadSeries() {
       active.value === requestedTariff &&
       profile.value?.revision === requestedRevision &&
       day.value === requestedDay
-    )
+    ) {
+      // Both relative days advance at HA midnight, even on DST transitions.
+      const midnight = requestedDay === "today" ? result.end : result.start;
+      seriesExpiresAt =
+        requestedAt + (Date.parse(midnight) - Date.parse(result.now));
       series.value =
-        result.tariff_type === requestedTariff &&
-        result.revision === requestedRevision &&
-        result.day === requestedDay
-          ? result
-          : null;
+        matchesRequest(result) && Date.now() < seriesExpiresAt ? result : null;
+    }
   } catch {
     if (!disposed && request === seriesRequest) series.value = null;
   } finally {
@@ -535,8 +547,26 @@ async function loadSeries() {
   }
 }
 watch(
-  [connected, active, () => profile.value?.revision, day, sourceState],
-  () => {
+  [
+    () => props.hass?.connection,
+    sourceState,
+    connected,
+    active,
+    () => profile.value?.revision,
+    day,
+  ],
+  ([connection, source], [previousConnection, previousSource]) => {
+    const dynamicSourceUnavailable =
+      active.value === "dynamic" &&
+      (!source?.state ||
+        source.state === "unknown" ||
+        source.state === "unavailable");
+    if (
+      connection !== previousConnection ||
+      (!source && previousSource) ||
+      dynamicSourceUnavailable
+    )
+      series.value = null;
     void loadSeries();
   },
   { immediate: true },

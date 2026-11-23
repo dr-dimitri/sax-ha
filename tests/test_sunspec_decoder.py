@@ -415,6 +415,24 @@ def test_decode_high_block_negates_grid_power_sign() -> None:
     assert data["grid_power_active_l1"] == 400
 
 
+@pytest.mark.parametrize("raw", [12370, -12370, 0, -32768])
+def test_positive_import_meter_changes_only_grid_active_power(raw: int) -> None:
+    """REQ-SUNSPEC-MODE-CORRECTION: Alle vier Netzwerte teilen die Zählerrichtung."""
+    high = _high({29: 450, 45: 14, 72: raw & 0xFFFF, 73: 12, 74: 0xFFFF, 75: 0x8000})
+    standard = dict(decode_high_block(high, DEFAULT_BATTERY_SCALE_FACTORS).values)
+    positive_import = decode_high_block(
+        high, DEFAULT_BATTERY_SCALE_FACTORS, meter_positive_import=True
+    ).values
+    expected = None if raw == -32768 else raw
+    assert positive_import == {
+        **standard,
+        "smartmeter_power": expected,
+        "grid_power_active_l1": 12,
+        "grid_power_active_l2": -1,
+        "grid_power_active_l3": None,
+    }
+
+
 def test_decode_high_block_applies_signed_storage_power() -> None:
     """storage_power_active ist int16: Laden (negativ) darf nicht als
     ~65000 W ankommen."""

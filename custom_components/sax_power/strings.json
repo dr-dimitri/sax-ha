@@ -9,7 +9,11 @@
           "port": "Port",
           "slave_id_basic": "Slave-ID (Basic Mode)",
           "slave_id_extended": "Slave-ID (SunSpec-Modus)",
-          "scan_interval": "Aktualisierungsintervall (Sekunden)"
+          "scan_interval": "Aktualisierungsintervall (Sekunden)",
+          "meter_positive_import": "Positiver Zählerwert bedeutet Netzbezug"
+        },
+        "data_description": {
+          "meter_positive_import": "Aktivieren, wenn die SAX-App Netzbezug zeigt und Home Assistant gleichzeitig Einspeisung meldet, etwa bei manchen ADW200-Installationen. Standardmäßig bedeutet ein positiver Zählerwert Einspeisung."
         }
       },
       "reconfigure": {
@@ -20,7 +24,11 @@
           "port": "Port",
           "slave_id_basic": "Slave-ID (Basic Mode)",
           "slave_id_extended": "Slave-ID (SunSpec-Modus)",
-          "scan_interval": "Aktualisierungsintervall (Sekunden)"
+          "scan_interval": "Aktualisierungsintervall (Sekunden)",
+          "meter_positive_import": "Positiver Zählerwert bedeutet Netzbezug"
+        },
+        "data_description": {
+          "meter_positive_import": "Aktivieren, wenn die SAX-App Netzbezug zeigt und Home Assistant gleichzeitig Einspeisung meldet, etwa bei manchen ADW200-Installationen. Standardmäßig bedeutet ein positiver Zählerwert Einspeisung."
         }
       },
       "grid_charge": {

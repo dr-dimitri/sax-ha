@@ -396,6 +396,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         scan_interval: int,
         entry_id: str,
         options: Mapping[str, Any] | None = None,
+        *,
+        meter_positive_import: bool = False,
     ) -> None:
         # Der Coordinator-Timer läuft mit dem kürzeren der beiden Intervalle,
         # damit weder der feste HIGH- noch der nutzerkonfigurierte
@@ -415,6 +417,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.client = client
         self.slave_id = slave_id
         self.slave_id_extended = slave_id_extended
+        self.meter_positive_import = meter_positive_import
         self.entry_id = entry_id
         # Options-Flow-Konfiguration (Strompreis-/PV-Prognose-Sensor, siehe
         # config_flow.SaxPowerOptionsFlow). __init__.async_update_options
@@ -3127,7 +3130,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     f"Modbus-Fehlerantwort (SunSpec-Modus): {extended_result}"
                 )
             decoded = decode_high_block(
-                extended_result.registers, self._battery_scale_factors
+                extended_result.registers,
+                self._battery_scale_factors,
+                meter_positive_import=self.meter_positive_import,
             )
         except (TimeoutError, ModbusException, SunSpecDecodeError) as err:
             if self._extended_available:

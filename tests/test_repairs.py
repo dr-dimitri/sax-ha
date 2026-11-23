@@ -267,6 +267,29 @@ async def test_foreign_price_unit_is_reported_immediately_and_clears(
     assert _get_issue(hass, ISSUE_PRICE_UNIT_UNSUPPORTED) is None
 
 
+async def test_price_unit_issue_tracks_the_new_source_while_problem_persists(
+    hass: HomeAssistant,
+) -> None:
+    """REQ-SELF-DIAGNOSIS-REPAIRS: Die Meldung folgt der aktiven Preisquelle."""
+    coordinator = _make_coordinator(hass)
+    coordinator.price_planner.plan = PricePlan(status=PRICE_STATUS_NO_PRICE_DATA)
+    first, second = "sensor.alter_preis", "sensor.neuer_preis"
+    for source in (first, second):
+        hass.states.async_set(source, "1", {"unit_of_measurement": "SEK/kWh"})
+    coordinator.options = {CONF_PRICE_SENSOR: first}
+    coordinator._async_check_self_diagnostics()
+    original = _get_issue(hass, ISSUE_PRICE_UNIT_UNSUPPORTED)
+    assert original.translation_placeholders == {"price_sensor": first}
+    ir.async_ignore_issue(hass, DOMAIN, original.issue_id, True)
+
+    coordinator.options = {CONF_PRICE_SENSOR: second}
+    coordinator._async_check_self_diagnostics()
+    issue = _get_issue(hass, ISSUE_PRICE_UNIT_UNSUPPORTED)
+    assert issue.translation_placeholders == {"price_sensor": second}
+    assert issue.created == original.created
+    assert issue.dismissed_version is not None
+
+
 async def test_price_sensor_missing_issue_after_grace_period(hass) -> None:
     coordinator = _make_coordinator(hass)
     coordinator.options = {CONF_PRICE_SENSOR: "sensor.strompreis"}

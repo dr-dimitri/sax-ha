@@ -393,6 +393,12 @@ PV-Start. Reicht die vorhandene Energie aus, meldet sie ausdrücklich, dass kein
 Netzladung nötig ist. Reichen Ladefenster oder Speicherkapazität nicht aus, zeigt
 sie den erwarteten Fehlbetrag und gegebenenfalls eine teilweise Aufladung.
 
+Die Planung zieht den Ladebeginn um bis zu **zehn Minuten** vor. Ein für
+03:00–04:00 Uhr berechneter Ladeblock beginnt dann um 02:50 Uhr und endet
+um 03:50 Uhr. Beginnt der günstige Tarif erst um 02:55 Uhr, verschiebt sich
+der Block auf 02:55–03:55 Uhr. Auch die aktuelle Uhrzeit und der freie Platz
+bis zur SOC-Obergrenze begrenzen den Vorlauf. Die geplante Lademenge bleibt gleich.
+
 Geplant wird jeweils eine zusammenhängende Ladung. Während sie läuft, bleibt
 ihre Verbrauchsbasis erhalten, auch wenn der Entladeprognose-Sensor durch die
 Ladung zurückgesetzt wird. Die Ladung endet spätestens zum geplanten Ende oder

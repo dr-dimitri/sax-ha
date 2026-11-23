@@ -82,12 +82,15 @@ def test_future_plan_becomes_due_without_moving_start_with_each_poll() -> None:
     assert session.status == "planned"
     assert session.plan is not None
     start, end = session.plan.start, session.plan.end
-    assert start == NOW + timedelta(hours=3)
+    assert start == NOW + timedelta(hours=2, minutes=50)
     assert not _prepare(session, now=NOW + timedelta(hours=1), data={"battery_soc": 20})
     assert session.plan is not None
     assert (session.plan.start, session.plan.end) == (start, end)
-    assert _prepare(session, now=start)
+    assert _prepare(session, now=start, data={"battery_soc": 10 + 5 / 6})
     assert session.plan is not None and session.plan.end == end
+    assert session.attributes["discharge_at"] == (NOW + timedelta(hours=3)).isoformat()
+    assert session.attributes["charge_start"] == start.isoformat()
+    assert session.attributes["pv_start"] == PV_START.isoformat()
 
 
 def test_active_charge_preserves_plan_across_forecast_reset() -> None:

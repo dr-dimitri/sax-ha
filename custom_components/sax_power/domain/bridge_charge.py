@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 _ENERGY_EPSILON = 1e-6
+_START_BUFFER_HOURS = 10 / 60
 
 
 class BridgeChargeStatus(StrEnum):
@@ -103,7 +104,7 @@ def plan_bridge_charge(
     charge_power_w: float,
     windows: Sequence[ChargeWindow],
 ) -> BridgeChargePlan:
-    """Choose the cheapest sufficient charge, then the latest feasible start.
+    """Choose the cheapest sufficient charge and buffer its latest feasible start.
 
     The caller supplies the measured, time-weighted average and the allowed
     tariff intervals. While charging, the grid supplies house consumption and
@@ -198,8 +199,15 @@ def plan_bridge_charge(
             end - duration,
             horizon - (power + discharge) * duration / discharge,
         )
-        before_charge = max(available - discharge * latest_start, 0.0)
         charged = power * duration
+        # Starting earlier leaves more energy in the battery. Keep enough
+        # headroom for the entire planned charge at the configured SOC ceiling.
+        headroom_start = (available - (maximum - charged)) / discharge
+        buffered_start = min(
+            latest_start,
+            max(start, headroom_start, latest_start - _START_BUFFER_HOURS),
+        )
+        before_charge = max(available - discharge * buffered_start, 0.0)
         missing = max(required - (power + discharge) * duration, 0.0)
         complete = missing <= _ENERGY_EPSILON
         candidates.append(
@@ -210,8 +218,8 @@ def plan_bridge_charge(
                     else BridgeChargeStatus.INSUFFICIENT
                 ),
                 discharge_until=discharge_until,
-                start=now + timedelta(hours=latest_start),
-                end=now + timedelta(hours=latest_start + duration),
+                start=now + timedelta(hours=buffered_start),
+                end=now + timedelta(hours=buffered_start + duration),
                 target_soc=min(
                     max_soc, min_soc + (before_charge + charged) / capacity_wh * 100
                 ),

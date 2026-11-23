@@ -18,8 +18,8 @@ from custom_components.sax_power.domain.bridge_charge import (
 NOW = datetime(2026, 9, 13, tzinfo=UTC)
 
 
-def _at(hours: float) -> datetime:
-    return NOW + timedelta(hours=hours)
+def _at(hours: float, minutes: int = 0) -> datetime:
+    return NOW + timedelta(hours=hours, minutes=minutes)
 
 
 def _window(start: float, end: float, price: float | None = None) -> ChargeWindow:
@@ -49,25 +49,23 @@ def test_charge_accounts_for_grid_supplied_consumption_during_charging() -> None
     plan = _plan()
     assert plan.status == BridgeChargeStatus.PLANNED
     assert plan.discharge_until == _at(3)
-    assert plan.start == _at(3)
-    assert plan.end == _at(4)
-    assert plan.target_soc == pytest.approx(30)
+    assert plan.start == _at(2, 50)
+    assert plan.end == _at(3, 50)
+    assert plan.target_soc == pytest.approx(30 + 5 / 6)
     assert plan.required_energy_wh == 2500
     assert plan.charge_energy_wh == 2000
     assert plan.missing_energy_wh == 0
-    # Four hours after charging consume exactly the newly stored energy.
-    assert 500 * (8 - 4) == plan.charge_energy_wh
 
 
 def test_weighted_average_is_used_without_reaveraging_observations() -> None:
     average = (1000 * 10 + 2000 * 50) / 60
-    plan = _plan(average_discharge_w=average)
+    plan = _plan(average_discharge_w=average, max_soc=100)
     expected_hours = (average * 8 - 1500) / (2000 + average)
     assert plan.end is not None and plan.start is not None
     assert (plan.end - plan.start).total_seconds() == pytest.approx(
         expected_hours * 3600
     )
-    assert plan.start == NOW + timedelta(hours=1500 / average)
+    assert plan.start == NOW + timedelta(hours=1500 / average, minutes=-10)
     assert plan.missing_energy_wh == 0
 
 
@@ -90,14 +88,41 @@ def test_zero_consumption_needs_no_charge_and_has_no_empty_time() -> None:
 def test_window_end_can_require_charging_before_empty_time() -> None:
     plan = _plan(windows=[_window(0, 2)])
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == _at(1) and plan.end == _at(2)
-    assert plan.target_soc == pytest.approx(40)
+    assert plan.start == _at(0, 50) and plan.end == _at(1, 50)
+    assert plan.target_soc == pytest.approx(40 + 5 / 6)
+
+
+def test_start_buffer_uses_only_time_available_at_the_tariff_price() -> None:
+    plan = _plan(windows=[ChargeWindow(_at(2, 55), _at(6))])
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert (plan.start, plan.end) == (_at(2, 55), _at(3, 55))
+    assert plan.charge_energy_wh == 2000
+    assert plan.missing_energy_wh == 0
+
+
+def test_start_buffer_waits_for_enough_capacity_to_deliver_the_planned_energy() -> None:
+    plan = _plan(max_soc=30.5)
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert (plan.start, plan.end) == (_at(2, 54), _at(3, 54))
+    assert plan.target_soc == pytest.approx(30.5)
+    assert plan.charge_energy_wh == 2000
+    assert plan.missing_energy_wh == 0
+
+
+def test_start_buffer_can_make_an_imminent_charge_due_now() -> None:
+    plan = _plan(soc=10.5)
+    assert plan.discharge_until == _at(0, 6)
+    assert plan.start == NOW
+    assert plan.end == _at(1.58)
+    assert plan.required_energy_wh == 3950
+    assert plan.charge_energy_wh == pytest.approx(3160)
+    assert plan.missing_energy_wh == 0
 
 
 def test_cheapest_sufficient_window_wins_even_when_earlier() -> None:
     plan = _plan(windows=[_window(0, 2, 0.1), _window(2, 6, 0.2)])
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == _at(1) and plan.end == _at(2)
+    assert plan.start == _at(0, 50) and plan.end == _at(1, 50)
     assert plan.price == 0.1
 
 
@@ -105,25 +130,25 @@ def test_cheapest_sufficient_window_wins_even_when_earlier() -> None:
 def test_equally_priced_sufficient_windows_choose_latest(price: float | None) -> None:
     plan = _plan(windows=[_window(0, 2, price), _window(2, 6, price)])
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == _at(3) and plan.end == _at(4)
+    assert plan.start == _at(2, 50) and plan.end == _at(3, 50)
 
 
 def test_known_prices_rank_before_unknown_prices() -> None:
     plan = _plan(windows=[_window(0, 2, 0.2), _window(2, 6)])
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == _at(1) and plan.price == 0.2
+    assert plan.start == _at(0, 50) and plan.price == 0.2
 
 
 def test_short_cheap_window_cannot_displace_sufficient_expensive_window() -> None:
     plan = _plan(windows=[_window(0, 0.5, 0.1), _window(2, 6, 0.2)])
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == _at(3) and plan.price == 0.2
+    assert plan.start == _at(2, 50) and plan.price == 0.2
 
 
 def test_capacity_ceiling_limits_partial_charge_and_reports_deficit() -> None:
     plan = _plan(max_soc=20)
     assert plan.status == BridgeChargeStatus.INSUFFICIENT
-    assert plan.start == _at(5.5) and plan.end == _at(6)
+    assert plan.start == _at(5, 20) and plan.end == _at(5, 50)
     assert plan.target_soc == pytest.approx(20)
     assert plan.charge_energy_wh == 1000
     assert plan.missing_energy_wh == 1250
@@ -197,7 +222,7 @@ def test_zero_usable_capacity_never_produces_charge() -> None:
 def test_adjacent_equal_price_segments_allow_continuous_charge() -> None:
     plan = _plan(windows=[_window(2.5, 3.5, 0.1), _window(3.5, 5, 0.1)])
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == _at(3) and plan.end == _at(4)
+    assert plan.start == _at(2, 50) and plan.end == _at(3, 50)
 
 
 def test_overlapping_equal_prices_merge_even_with_other_price_between() -> None:
@@ -205,7 +230,7 @@ def test_overlapping_equal_prices_merge_even_with_other_price_between() -> None:
         windows=[_window(2.5, 3.5, 0.1), _window(3, 4.1, 0.3), _window(3.5, 5, 0.1)]
     )
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == _at(3) and plan.end == _at(4) and plan.price == 0.1
+    assert plan.start == _at(2, 50) and plan.end == _at(3, 50) and plan.price == 0.1
 
 
 def test_differently_priced_segments_do_not_create_fictitious_flat_price() -> None:
@@ -216,15 +241,15 @@ def test_differently_priced_segments_do_not_create_fictitious_flat_price() -> No
 
 
 def test_midnight_window_uses_elapsed_time() -> None:
-    now = datetime(2026, 9, 13, 22, tzinfo=UTC)
+    now = datetime(2026, 9, 13, 21, 5, tzinfo=UTC)
     plan = _plan(
         now=now,
         pv_start=now + timedelta(hours=8),
         windows=[ChargeWindow(now, now + timedelta(hours=6))],
     )
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == datetime(2026, 9, 14, 1, tzinfo=UTC)
-    assert plan.end == datetime(2026, 9, 14, 2, tzinfo=UTC)
+    assert plan.start == datetime(2026, 9, 13, 23, 55, tzinfo=UTC)
+    assert plan.end == datetime(2026, 9, 14, 0, 55, tzinfo=UTC)
 
 
 @pytest.mark.parametrize("month,day,elapsed", [(3, 29, 7), (10, 25, 9)])
@@ -234,7 +259,7 @@ def test_dst_horizon_uses_utc_elapsed_hours(month: int, day: int, elapsed: int) 
     pv_start = datetime(2026, month, day, 8, tzinfo=zone)
     plan = _plan(now=now, pv_start=pv_start, windows=[ChargeWindow(now, pv_start)])
     assert plan.status == BridgeChargeStatus.PLANNED
-    assert plan.start == now.astimezone(UTC) + timedelta(hours=3)
+    assert plan.start == now.astimezone(UTC) + timedelta(hours=2, minutes=50)
     duration = (500 * elapsed - 1500) / 2500
     assert plan.end == plan.start + timedelta(hours=duration)
     assert plan.start.tzinfo is UTC and plan.end.tzinfo is UTC

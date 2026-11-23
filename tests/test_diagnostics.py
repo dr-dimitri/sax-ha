@@ -12,11 +12,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from custom_components.sax_power.application.calibration import CalibrationState
 from custom_components.sax_power.const import (
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_TARIFF_TYPE,
+    CONF_METER_POSITIVE_IMPORT,
     DATA_COORDINATOR,
     DOMAIN,
 )
@@ -28,7 +31,9 @@ from custom_components.sax_power.diagnostics import (
 from tests.ha import MockConfigEntry
 
 
-def _make_entry_with_coordinator(hass) -> tuple[MockConfigEntry, SaxPowerCoordinator]:
+def _make_entry_with_coordinator(
+    hass, *, meter_positive_import: bool = False
+) -> tuple[MockConfigEntry, SaxPowerCoordinator]:
     client = MagicMock()
     client.connected = True
     client.connect = AsyncMock(return_value=True)
@@ -39,6 +44,7 @@ def _make_entry_with_coordinator(hass) -> tuple[MockConfigEntry, SaxPowerCoordin
         slave_id_extended=100,
         scan_interval=10,
         entry_id="test_entry_id",
+        meter_positive_import=meter_positive_import,
     )
     coordinator.data = {"soc": 42, "storage_power_active": -500}
 
@@ -70,13 +76,18 @@ async def test_diagnostics_redacts_host(hass) -> None:
     assert diagnostics["connection"]["port"] == 502
 
 
-async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
+@pytest.mark.parametrize("meter_positive_import", [False, True])
+async def test_diagnostics_includes_coordinator_data_and_state(
+    hass, meter_positive_import: bool
+) -> None:
     """Diagnostics müssen sowohl die aktuellen Messwerte (coordinator.data)
     als auch den relevanten internen Zustand (Max-SOC-Sperre,
     zeitgesteuertes/netzdienliches Laden, SunSpec-Erreichbarkeit) enthalten
     - das ist der eigentliche Mehrwert gegenüber einem reinen
     Sensor-Snapshot für Support-/Bugreport-Zwecke."""
-    entry, coordinator = _make_entry_with_coordinator(hass)
+    entry, coordinator = _make_entry_with_coordinator(
+        hass, meter_positive_import=meter_positive_import
+    )
     await coordinator.async_set_max_soc(80)
     last_full = datetime(2026, 8, 24, 8, 0, tzinfo=UTC)
     coordinator._cell_calibration_state = CalibrationState(
@@ -93,6 +104,7 @@ async def test_diagnostics_includes_coordinator_data_and_state(hass) -> None:
     assert diagnostics["coordinator_data"]["soc"] == 42
     assert diagnostics["coordinator_data"]["storage_power_active"] == -500
     assert diagnostics["control_config"]["max_soc"] == 80
+    assert diagnostics["state"][CONF_METER_POSITIVE_IMPORT] is meter_positive_import
     assert diagnostics["state"]["effective_max_soc"] == 100
     assert diagnostics["state"]["cell_calibration_active"] is True
     assert diagnostics["state"]["last_full_charge_at"] == last_full.isoformat()

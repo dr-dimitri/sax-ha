@@ -20,6 +20,7 @@ from .const import (
     CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_PRIOR_RESULT,
     CONF_GRID_SERVING_PV_FORECAST_SENSOR,
+    CONF_METER_POSITIVE_IMPORT,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
@@ -150,6 +151,7 @@ async def async_get_config_entry_diagnostics(
                 if key != "sun_serial_number"
             },
             "state": {
+                CONF_METER_POSITIVE_IMPORT: coordinator.meter_positive_import,
                 "control_config_status": coordinator.control_config_status,
                 "control_bootstrap_pending": coordinator.control_bootstrap_pending,
                 "control_config_migration_pending": (

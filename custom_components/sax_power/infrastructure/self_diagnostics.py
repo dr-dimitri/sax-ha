@@ -67,7 +67,7 @@ class SelfDiagnostics:
         self._hass = hass
         self._entry_id = entry_id
         self._price_sensor_missing_since: float | None = None
-        self._active_issue_ids: set[str] = set()
+        self._active_issues: dict[str, dict[str, str] | None] = {}
 
     def check(self, snapshot: DiagnosticSnapshot, now: float) -> None:
         """Evaluate every self-diagnostic rule for one coordinator update."""
@@ -121,13 +121,16 @@ class SelfDiagnostics:
     ) -> None:
         """REQ-SELF-DIAGNOSIS-REPAIRS: Registry-Issues überleben einen Reload."""
         if not problem:
-            if issue_id in self._active_issue_ids or (
+            if issue_id in self._active_issues or (
                 ir.async_get(self._hass).async_get_issue(DOMAIN, issue_id) is not None
             ):
                 ir.async_delete_issue(self._hass, DOMAIN, issue_id)
-            self._active_issue_ids.discard(issue_id)
+            self._active_issues.pop(issue_id, None)
             return
-        if issue_id in self._active_issue_ids:
+        if (
+            issue_id in self._active_issues
+            and self._active_issues[issue_id] == translation_placeholders
+        ):
             return
         async_create_entry_issue(
             self._hass,
@@ -136,7 +139,7 @@ class SelfDiagnostics:
             translation_key=translation_key,
             translation_placeholders=translation_placeholders,
         )
-        self._active_issue_ids.add(issue_id)
+        self._active_issues[issue_id] = translation_placeholders
 
     def _check_price_sensor_missing(
         self, snapshot: DiagnosticSnapshot, now: float

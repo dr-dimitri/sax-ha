@@ -56,7 +56,8 @@ const sampleSeries = (
   time_zone: "Europe/Berlin",
   start: "2026-09-13T00:00:00+02:00",
   end: "2026-09-14T00:00:00+02:00",
-  now: "2026-09-13T12:15:00+02:00",
+  now:
+    day === "today" ? "2026-09-13T12:15:00+02:00" : "2026-09-12T12:15:00+02:00",
   current_price_ct_kwh: -2.5,
   status: "partial",
   reason: null,
@@ -88,6 +89,7 @@ async function mount(
     readonly?: boolean;
     language?: string;
     enabled?: boolean;
+    series?: TariffPriceSeries;
   } = {},
 ) {
   const sample = chargingSample(options.language ?? "de");
@@ -146,7 +148,9 @@ async function mount(
         return structuredClone(stored);
       if (request.type === "sax_power/dashboard/tariff/series")
         return {
-          ...sampleSeries(request.day as "today" | "tomorrow"),
+          ...(options.series && options.series.day === request.day
+            ? options.series
+            : sampleSeries(request.day as "today" | "tomorrow")),
           tariff_type: stored.tariff_type,
         };
       if (request.type === "sax_power/dashboard/tariff/configure") {
@@ -873,6 +877,165 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     await flush();
     expect(fixture.root.querySelector(".tariff-price-chart svg")).toBeNull();
     expect(fixture.root.querySelector(".electricity-current-price")).toBeNull();
+  });
+  it("keeps the price table, keyboard focus and selected interval across a minute refresh", async () => {
+    vi.useFakeTimers();
+    const fixture = await mount({ type: "dynamic" });
+    fixture.root.querySelector<HTMLDetailsElement>(
+      ".electricity-price-details",
+    )!.open = true;
+    const table = fixture.root.querySelector<HTMLDetailsElement>(
+      ".tariff-price-chart details",
+    )!;
+    table.open = true;
+    const graph = fixture.root.querySelector<SVGElement>(
+      ".tariff-price-chart svg",
+    )!;
+    graph.focus();
+    graph.dispatchEvent(new KeyboardEvent("keydown", { key: "End" }));
+    await flush();
+    expect(
+      fixture.root.querySelector(".tariff-price-chart__detail")?.textContent,
+    ).toContain("-2,50");
+    let complete!: (series: TariffPriceSeries) => void;
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffPriceSeries>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    vi.advanceTimersByTime(60000);
+    await flush();
+    expect(table.isConnected && table.open).toBe(true);
+    expect(document.activeElement).toBe(graph);
+    const updated = sampleSeries();
+    updated.slots.shift();
+    updated.slots.at(-1)!.price_ct_kwh = 5.15;
+    complete({ ...updated, tariff_type: "dynamic" });
+    await flush();
+    expect(
+      fixture.root.querySelector(".tariff-price-chart__detail")?.textContent,
+    ).toContain("5,15");
+    expect(table.isConnected && table.open).toBe(true);
+    expect(document.activeElement).toBe(graph);
+  });
+  it("hides the previous day's prices and date while the selected day loads", async () => {
+    const fixture = await mount({ type: "dynamic" });
+    let complete!: (series: TariffPriceSeries) => void;
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise<TariffPriceSeries>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    await click(fixture.root, "Morgen");
+    expect(
+      fixture.root.querySelector(".electricity-day")?.textContent?.trim(),
+    ).toBe("Morgen");
+    expect(fixture.root.querySelector(".tariff-price-chart table")).toBeNull();
+    complete({
+      ...sampleSeries("tomorrow"),
+      date: "2026-09-14",
+      tariff_type: "dynamic",
+    });
+    await flush();
+    expect(
+      fixture.root.querySelector(".electricity-day")?.textContent,
+    ).toContain("14.09.2026");
+  });
+  it.each(["today", "tomorrow"] as const)(
+    "hides expired %s prices during the first refresh after HA midnight",
+    async (day) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-09-13T12:00:00Z"));
+      const series = sampleSeries(day);
+      series.now =
+        day === "today"
+          ? "2026-09-13T23:59:30+02:00"
+          : "2026-09-12T23:59:30+02:00";
+      const fixture = await mount({ type: "dynamic", series });
+      if (day === "tomorrow") await click(fixture.root, "Morgen");
+      expect(
+        fixture.root.querySelector(".tariff-price-chart table"),
+      ).not.toBeNull();
+      fixture.callWS.mockImplementationOnce(() => new Promise(() => {}));
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(
+        fixture.root.querySelector(".tariff-price-chart table"),
+      ).toBeNull();
+      expect(
+        fixture.root.querySelector(".electricity-day")?.textContent,
+      ).not.toContain("13.09.2026");
+    },
+  );
+  it("clears published prices as soon as the price source disappears and keeps them hidden after access denial", async () => {
+    const fixture = await mount({ type: "dynamic" });
+    expect(
+      fixture.root.querySelector(".tariff-price-chart table"),
+    ).not.toBeNull();
+    let deny!: () => void;
+    fixture.callWS.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          deny = () => reject({ code: "forbidden" });
+        }),
+    );
+    const states = { ...fixture.hass.value.states };
+    delete states["sensor.market_price"];
+    fixture.hass.value = { ...fixture.hass.value, states };
+    await flush();
+    expect(fixture.root.querySelector(".tariff-price-chart table")).toBeNull();
+    deny();
+    await flush();
+    expect(fixture.root.querySelector(".tariff-price-chart table")).toBeNull();
+  });
+  it.each(["unavailable", "unknown", ""])(
+    "clears prices while awaiting a refresh for dynamic sensor state %j",
+    async (state) => {
+      const fixture = await mount({ type: "dynamic" });
+      expect(
+        fixture.root.querySelector(".tariff-price-chart table"),
+      ).not.toBeNull();
+      fixture.callWS.mockImplementationOnce(() => new Promise(() => {}));
+      const id = "sensor.market_price";
+      fixture.hass.value = {
+        ...fixture.hass.value,
+        states: {
+          ...fixture.hass.value.states,
+          [id]: { ...fixture.hass.value.states[id]!, state },
+        },
+      };
+      await flush();
+      expect(
+        fixture.root.querySelector(".tariff-price-chart table"),
+      ).toBeNull();
+      expect(
+        fixture.root.querySelector(".electricity-current-price")?.textContent,
+      ).not.toContain("-2,50");
+    },
+  );
+  it("requires a fresh price response when switching between connected HA sockets", async () => {
+    const fixture = await mount({ type: "dynamic" });
+    const table = fixture.root.querySelector(".tariff-price-chart table");
+    expect(table).not.toBeNull();
+    const original = fixture.callWS.getMockImplementation()!;
+    let deny!: () => void;
+    fixture.callWS.mockImplementation((request) =>
+      request.type === "sax_power/dashboard/tariff/series"
+        ? new Promise((_, reject) => {
+            deny = () => reject({ code: "forbidden" });
+          })
+        : original(request),
+    );
+    fixture.hass.value = {
+      ...fixture.hass.value,
+      connection: { ...fixture.hass.value.connection! },
+    };
+    await flush();
+    expect(fixture.root.querySelector(".tariff-price-chart table")).toBeNull();
+    deny();
+    await flush();
+    expect(fixture.root.querySelector(".tariff-price-chart table")).toBeNull();
   });
   it("loads tomorrow prices on demand and preserves a missing tomorrow as unavailable", async () => {
     const fixture = await mount({ type: "dynamic" });

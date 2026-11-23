@@ -252,3 +252,38 @@ async def test_overflowing_forecast_value_leaves_a_gap_instead_of_crashing(
     assert plan.current_price is None
     assert coordinator.tariff_provider.quote(NOW).quote is None
     assert len(plan.slots) == 1
+
+
+@pytest.mark.parametrize(
+    "end",
+    ["2026-09-13T12:00:00Z", "2026-09-13T11:45:00Z", "2026-09-31T13:00:00Z"],
+    ids=["zero-duration", "backwards", "invalid-date"],
+)
+async def test_invalid_explicit_end_never_authorizes_charging(
+    coordinator: SaxPowerCoordinator, hass: HomeAssistant, end: str
+) -> None:
+    """REQ-DYNAMIC-PRICE-CHARGE: A bad end cannot create a cheap hour."""
+    start = NOW.replace(minute=0)
+    hour = timedelta(hours=1)
+    hass.states.async_set(
+        "sensor.price",
+        "10",
+        {
+            "unit_of_measurement": "ct/kWh",
+            "raw_today": [
+                {"start": (start - hour).isoformat(), "price": 15},
+                {"start": start.isoformat(), "end": end, "price": 1},
+                _slot(start + hour, start + 2 * hour, 45),
+            ],
+        },
+    )
+    with patch(
+        "custom_components.sax_power.price_optimizer.dt_util.now", return_value=NOW
+    ):
+        plan = coordinator.price_planner.evaluate()
+    assert not plan.charge_now
+    assert plan.current_price is None
+    provider = coordinator.tariff_provider
+    assert provider.quote(NOW).quote is None
+    assert provider.quote(NOW - hour).price_eur_kwh == pytest.approx(0.15)
+    assert provider.quote(NOW + hour).price_eur_kwh == pytest.approx(0.45)

@@ -9,7 +9,11 @@
           "port": "Port",
           "slave_id_basic": "Slave ID (Basic Mode)",
           "slave_id_extended": "Slave ID (SunSpec mode)",
-          "scan_interval": "Update interval (seconds)"
+          "scan_interval": "Update interval (seconds)",
+          "meter_positive_import": "Positive raw meter power means grid import"
+        },
+        "data_description": {
+          "meter_positive_import": "Enable this if the SAX app shows grid import while Home Assistant shows feed-in, for example with some ADW200 installations. By default, positive meter readings mean feed-in."
         }
       },
       "reconfigure": {
@@ -20,7 +24,11 @@
           "port": "Port",
           "slave_id_basic": "Slave ID (Basic Mode)",
           "slave_id_extended": "Slave ID (SunSpec mode)",
-          "scan_interval": "Update interval (seconds)"
+          "scan_interval": "Update interval (seconds)",
+          "meter_positive_import": "Positive raw meter power means grid import"
+        },
+        "data_description": {
+          "meter_positive_import": "Enable this if the SAX app shows grid import while Home Assistant shows feed-in, for example with some ADW200 installations. By default, positive meter readings mean feed-in."
         }
       },
       "grid_charge": {

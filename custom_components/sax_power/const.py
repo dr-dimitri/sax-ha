@@ -9,6 +9,7 @@ DOMAIN = "sax_power"
 CONF_SLAVE_ID_BASIC = "slave_id_basic"
 CONF_SLAVE_ID_EXTENDED = "slave_id_extended"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_METER_POSITIVE_IMPORT = "meter_positive_import"
 
 # Optionale Vorbelegung für das zeitgesteuerte Laden (Zeitfenster + aktiv),
 # abgefragt im zweiten Schritt der Ersteinrichtung (config_flow.py). Wirkt
@@ -445,8 +446,7 @@ ISSUE_EXTENDED_MODE_UNAVAILABLE = "extended_mode_unavailable"
 # REQ-SUNSPEC-MODE-CORRECTION): ein NEGATIVER Anzeigewert steht für
 # Überschuss aus der Dachphotovoltaik (Einspeisung ins Netz), ein
 # POSITIVER Anzeigewert für Netzbezug - der Rohregisterwert kann davon
-# abweichen, domain.sunspec.decode_high_block negiert den skalierten Wert
-# beim Einlesen entsprechend (ScaledField.negate).
+# abweichen. Der Decoder berücksichtigt die konfigurierte Zählerrichtung.
 #
 # Wird außerdem von der Zustandsmaschine für netzdienliches Laden
 # (SaxPowerCoordinator._async_step_grid_serving, REQ-GRID-SERVING-CHARGE) für

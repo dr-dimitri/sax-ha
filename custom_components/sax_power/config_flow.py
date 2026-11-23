@@ -25,6 +25,7 @@ from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
+from . import modbus_connection_settings
 from .application.economics import parse_price
 from .application.tariff_profiles import tariff_profiles_from_options
 from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
@@ -39,6 +40,7 @@ from .const import (
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_ECONOMICS_TOU_BASE_PRICE,
     CONF_GRID_SERVING_PV_FORECAST_SENSOR,
+    CONF_METER_POSITIVE_IMPORT,
     CONF_PRICE_ATTRIBUTE,
     CONF_PRICE_SENSOR,
     CONF_PRICE_UNIT,
@@ -148,6 +150,7 @@ STEP_CONNECTION_SCHEMA = vol.Schema(
         vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
             vol.Coerce(int), vol.Range(min=5, max=3600)
         ),
+        vol.Required(CONF_METER_POSITIVE_IMPORT, default=False): bool,
     }
 )
 
@@ -377,10 +380,18 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(f"{host}:{port}")
                 self._abort_if_unique_id_configured()
 
+            meter_change_only = (
+                reconfigure_entry is not None
+                and user_input.get(CONF_METER_POSITIVE_IMPORT, False)
+                != reconfigure_entry.data.get(CONF_METER_POSITIVE_IMPORT, False)
+                and modbus_connection_settings(user_input)
+                == modbus_connection_settings(reconfigure_entry.data)
+            )
             try:
-                await _async_validate_connection(
-                    host, port, user_input[CONF_SLAVE_ID_BASIC]
-                )
+                if not meter_change_only:
+                    await _async_validate_connection(
+                        host, port, user_input[CONF_SLAVE_ID_BASIC]
+                    )
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidResponse:

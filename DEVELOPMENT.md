@@ -604,8 +604,11 @@ Naht für weitere schrittweise Extraktionen.
 
 `config_flow.py` implementiert sowohl `async_step_user` (Ersteinrichtung) als
 auch `async_step_reconfigure` (spätere Änderung, z. B. der IP-Adresse) über
-eine gemeinsame Methode (`_async_step_connection`). Beide validieren die
-Verbindung mit demselben Testread, bevor die Daten gespeichert werden. Nur
+eine gemeinsame Methode (`_async_step_connection`). Bei der Ersteinrichtung
+und bei geänderten Verbindungsdaten prüft derselbe Modbus-Lesezugriff die
+Erreichbarkeit. Ändert sich ausschließlich die Vorzeichenkonvention des
+Zählers, speichert der Flow sie sofort. Der folgende Reload liest den
+ersten Messwert bereits mit der neuen Konvention ein.
 `async_step_user` verzweigt bei Erfolg zusätzlich in zwei weitere
 Schritte, bevor der Eintrag angelegt wird - `async_step_reconfigure`
 überspringt sie alle: `async_step_grid_charge` (Vorbelegung für das

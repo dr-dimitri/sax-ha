@@ -230,7 +230,7 @@ class ScaledField:
     signed: bool
     scale_factor_address: int | None = None
     battery_scale_factor: str | None = None
-    negate: bool = False
+    grid_active_power: bool = False
 
     def __post_init__(self) -> None:
         # Läuft einmalig beim Aufbau von HIGH_BLOCK_FIELDS (Modulimport):
@@ -448,42 +448,34 @@ HIGH_BLOCK_FIELDS: tuple[HighBlockField, ...] = (
         signed=False,
         scale_factor_address=REG_SUN_METER_FREQUENCY_SF,
     ),
-    # Ersetzt das früher fehlerhafte "smartmeter_power" (Basic Mode, Register
-    # 48), siehe anforderung.yaml REQ-SUNSPEC-MODE-CORRECTION. negate=True:
-    # Standarddarstellung ist negativ = Einspeisung ins Netz (PV-Überschuss),
-    # positiv = Netzbezug - das Register selbst meldet das Gegenteil (siehe
-    # REQ-SUNSPEC-MODE-CORRECTION, Abschnitt Vorzeichenkonvention).
+    # REQ-SUNSPEC-MODE-CORRECTION: Zählerrichtung für Summe und alle Phasen.
     ScaledField(
         "smartmeter_power",
         REG_SUN_METER_POWER_ACTIVE_SUM,
         signed=True,
         scale_factor_address=REG_SUN_METER_POWER_ACTIVE_SF,
-        negate=True,
+        grid_active_power=True,
     ),
-    # Dieselbe Negation wie bei smartmeter_power (siehe oben) - die drei
-    # Phasenwerte sind Teil desselben Registerblocks und teilen sich dessen
-    # Rohvorzeichen; ohne Negation würde ihre Summe nicht mehr zum bereits
-    # negierten smartmeter_power passen.
     ScaledField(
         "grid_power_active_l1",
         REG_SUN_METER_POWER_ACTIVE_L1,
         signed=True,
         scale_factor_address=REG_SUN_METER_POWER_ACTIVE_SF,
-        negate=True,
+        grid_active_power=True,
     ),
     ScaledField(
         "grid_power_active_l2",
         REG_SUN_METER_POWER_ACTIVE_L2,
         signed=True,
         scale_factor_address=REG_SUN_METER_POWER_ACTIVE_SF,
-        negate=True,
+        grid_active_power=True,
     ),
     ScaledField(
         "grid_power_active_l3",
         REG_SUN_METER_POWER_ACTIVE_L3,
         signed=True,
         scale_factor_address=REG_SUN_METER_POWER_ACTIVE_SF,
-        negate=True,
+        grid_active_power=True,
     ),
     ScaledField(
         "grid_power_apparent_sum",
@@ -640,7 +632,10 @@ def decode_low_blocks(low1: Sequence[int], low2: Sequence[int]) -> DecodedLowBlo
 
 
 def decode_high_block(
-    high: Sequence[int], scale_factors: BatteryScaleFactors
+    high: Sequence[int],
+    scale_factors: BatteryScaleFactors,
+    *,
+    meter_positive_import: bool = False,
 ) -> DecodedHighBlock:
     """Decodiere den HIGH-Intervall-Teilblock (dynamische Mess-/Zustandswerte).
 
@@ -678,12 +673,13 @@ def decode_high_block(
                 value = apply_typed_sunssf(
                     reg(field.address), scale_factor_raw, signed=field.signed
                 )
-                # None bleibt None statt am unären Minus zu crashen, sobald
-                # das Register den "not implemented"-Sentinel meldet
-                # (REQ-SUNSPEC-DATATYPES).
-                values[field.key] = (
-                    -value if field.negate and value is not None else value
-                )
+                if (
+                    field.grid_active_power
+                    and not meter_positive_import
+                    and value is not None
+                ):
+                    value = -value
+                values[field.key] = value
             case EnumField():
                 raw = reg(field.address)
                 decoded = decode_int16(raw) if field.signed else decode_uint16(raw)

@@ -147,6 +147,11 @@ requirement_bridge_charge:
     Die Einstellung timed_charge_min_soc wird durch den berechneten Bedarf
     ersetzt. Netzladen Max. SOC und die globale Max-SOC-Grenze begrenzen
     weiterhin das Ziel. Ohne Bedarf findet keine geplante Netzladung statt.
+    Bei Bedarf beträgt der geplante Energiezuwachs im Speicher mindestens
+    1 kWh. Der freie Platz bis zum wirksamen Netzladen Max. SOC begrenzt
+    die Mindestlademenge. Reicht die Zeit im Tarifabschnitt bis PV-Start
+    für diese gegebenenfalls begrenzte Menge nicht aus, beginnt dort
+    kein Auftrag.
 
     domain/bridge_charge.py erhält ausschließlich Daten und ausdrücklich
     erlaubte Ladeintervalle. Die Berechnung kennt weder Home Assistant noch
@@ -156,8 +161,9 @@ requirement_bridge_charge:
     Verbrauch bis PV-Start. Während Netzladung wird der Hausverbrauch direkt
     vom Netz gedeckt; dies verringert ebenfalls den Überbrückungsbedarf.
     Ein Auftrag ist zusammenhängend und endet innerhalb eines erlaubten
-    Intervalls spätestens zum PV-Start. Ausreichende Kandidaten werden nach
-    Preis und anschließend spätestem Start ausgewählt. Gegenüber diesem
+    Intervalls spätestens zum PV-Start. Bei gleicher Bedarfsdeckung haben
+    Kandidaten mit mindestens 1 kWh Vorrang. Danach entscheiden Preis und
+    spätester Start. Gegenüber diesem
     spätesten Start zieht die Planung den gesamten Ladeblock um bis zu
     zehn Minuten vor. Die aktuelle Uhrzeit, der Beginn des erlaubten
     Tarifabschnitts und der für die volle geplante Lademenge benötigte
@@ -165,6 +171,8 @@ requirement_bridge_charge:
     die zum vorgezogenen Start noch vorhandene Energie. Reicht kein Kandidat,
     ist ein begrenzter Teilauftrag mit größtmöglicher Bedarfsdeckung zulässig;
     die verbleibende Energiemenge wird ausdrücklich als Fehlbetrag angegeben.
+    Auch bei zusätzlicher Energie durch die Mindestlademenge zählt eine
+    Versorgungslücke vor dem Ladestart zum Fehlbetrag.
 
     Die erlaubten Intervalle stammen ausschließlich aus den Tarifpreisfenstern
     des gespeicherten TIME_OF_USE-Tarifs nach REQ-TIME-OF-USE-CHARGE-SOURCE.
@@ -217,13 +225,21 @@ requirement_bridge_charge:
     sobald die Daten wieder gültig sind, darf derselbe Auftrag innerhalb
     seiner ursprünglichen Grenzen weiterladen. Ein geänderter PV-Start in
     einer wieder gültigen Prognose allein verändert das gebundene Ziel
-    und Ende nicht. Während der Lücke werden
+    und die erlaubten Zeitgrenzen nicht. Während der Lücke werden
     keine weiteren Ladesollwerte freigegeben. Dies gilt auch im periodischen
     Writer und bei Datenverlust während einer Gerätequittierung. Ein
     Basic-Read-Ausfall erhält die Sitzung ebenfalls als Pause. Änderungen
     an den relevanten Ladeeinstellungen entwerten den Auftrag auch während
     einer Datenlücke.
-    Der Auftrag endet bei erreichtem SOC-Ziel oder festem Endzeitpunkt.
+    Bei planmäßigem Verlauf endet der Auftrag bei erreichtem SOC-Ziel oder
+    zum geplanten Endzeitpunkt. Frische SOC- und Kapazitätsmesswerte bestimmen
+    den tatsächlichen Energiezuwachs seit Ladebeginn. Zeigen sie am geplanten
+    Ende einen Zuwachs unterhalb der wirksamen Mindestmenge, setzt der Auftrag
+    die Ladung bis zum Mindestziel fort. Dieses Ziel entspricht 1 kWh Zuwachs
+    oder dem bei Ladebeginn verfügbaren Platz bis zum wirksamen Netzladen
+    Max. SOC, falls dieser kleiner ist. Bei einem höheren Planziel endet die
+    Verlängerung ebenfalls am Mindestziel. Das ursprüngliche Tarifende und
+    der im Plan gebundene PV-Start begrenzen die Ladung in jedem Fall.
     Auch bei einer Datenlücke durchläuft er dieselbe Abschlussbewertung:
     Der Restbedarf bis zum im Plan gebundenen PV-Start wird aus dessen
     eingefrorenem Entladedurchschnitt und der aktuell gemessenen nutzbaren
@@ -247,8 +263,8 @@ requirement_bridge_charge:
     Auftrag. Manuelle Ladung, PV-Überschuss und globale Schutzgrenzen bleiben
     wirksam. Bei fälliger Zellkalibrierung steigen effective_max_soc und
     effective_timed_charge_max_soc auf 100 %. Dies erweitert nur die
-    wirksamen Obergrenzen; Bedarf und erlaubte Tarifpreisfenster bestimmen
-    weiterhin den Auftrag bis PV-Start. Es erfolgt kein Rückfall auf
+    wirksamen Obergrenzen. Bedarf, Mindestlademenge und erlaubte Tarifpreisfenster
+    bestimmen weiterhin den Auftrag bis PV-Start. Es erfolgt kein Rückfall auf
     separates Netzladezeitfenster oder Min-SOC und keine zusätzliche
     ungeplante Netzladung bis 100 %. PV oder ein ausreichend hoher
     Überbrückungsbedarf können 100 % erreichen. Außerhalb dieser Betriebsart
@@ -262,7 +278,7 @@ requirement_bridge_charge:
     Nach erkanntem Auftragsende benennt completed_at den Abschlusszeitpunkt;
     completion_evaluated_at ist bis zur Bewertung None und danach deren
     Zeitpunkt. data_gap_reason hält den Unterbrechungsgrund getrennt vom
-    Abschlussergebnis fest. Eine echte Wiederaufnahme vor Planende entfernt
+    Abschlussergebnis fest. Eine echte Wiederaufnahme des gültigen Auftrags entfernt
     diesen Grund; der Abschluss erhält ihn. Die Oberfläche unterscheidet
     beendete Aufträge von erst geplanten Teilladungen, zeigt eine ausstehende
     Bewertung ausdrücklich als unbekannte Fehlmenge und nennt Datenlücke
@@ -310,15 +326,17 @@ requirement_bridge_charge:
     - "Bei 0, 45 und 60 Sekunden altem as_of bleiben angenommene Snapshots bis zur nächsten regulären Abfrage nutzbar. Refresh, Timeout und frühere Wiederholungen verlängern keine alte Nutzungsfrist; Vertragsfehler, Quellenwechsel und absolute Altersgrenzen bleiben wirksam."
     - "tests/test_pv_bridge_forecast.py belegt bei 2-Sekunden-Polls über zehn Minuten zehn Serviceaufrufe auch bei dauerhaft abgelehnten Antworten. Nur HomeAssistantError/TimeoutError wechseln auf zehn Sekunden; empfangene Ablehnungen und lokale Verarbeitungsfehler beenden diesen Retry. Ein unveränderter Ablehnungsgrund erzeugt bis zu einer gültigen Antwort oder einem Quellenwechsel keinen weiteren Logeintrag."
     - "Reicht die Batterie bis PV-Start, lautet der Status not_needed und es gibt keinen Ladeauftrag."
+    - "Bei positivem Bedarf plant ein Auftrag mindestens 1 kWh Energiezuwachs im Speicher ein. Der verfügbare Platz bis zum wirksamen Netzladen Max. SOC kann die Mindestmenge reduzieren. Ein Tarifabschnitt, der bis zum PV-Start zu kurz für die so bestimmte Menge ist, startet keinen Auftrag."
     - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
     - "Bei ausreichendem Spielraum beginnen und enden Voll- und Teilaufträge zehn Minuten früher. Mit weniger Spielraum wird nur der verfügbare Vorlauf genutzt. Ladedauer, Lademenge und berechneter Fehlbetrag bleiben erhalten."
     - "Ein nicht vollständig deckbarer Bedarf bleibt als shortfall_kwh sichtbar, auch wenn eine Teilaufladung bereits läuft."
-    - "Während des gestarteten Auftrags beendet der normale Entladeprognose-Reset allein nicht die Ladung. Der feste Endzeitpunkt und das SOC-Ziel bleiben verbindlich."
+    - "Während des gestarteten Auftrags beendet der normale Entladeprognose-Reset allein nicht die Ladung. Bei planmäßigem Verlauf gelten das geplante Ende und das SOC-Ziel."
+    - "Bei langsamer tatsächlicher Ladung und frischem, gültigem SOC setzt derselbe Auftrag die Ladung über das geplante Ende bis zum Mindestziel fort. Das ursprüngliche Tarifende und der gebundene PV-Start bleiben harte Grenzen. Messdaten- oder Prognoseausfall sowie Schutz- und Prioritätsregeln können die Ladung vorher unterbrechen."
     - "Kurze PV-/Messdatenlücken erhalten den gestarteten Plan und dessen Verbrauchsbasis als Pause. Nach Rückkehr gültiger Daten wird ohne neue Entlademinute weitergeladen, sofern Ziel, Ende und Konfiguration weiterhin gelten. Fehlende Daten vor dem Start geben keinen Auftrag frei."
     - "Fehlende PV-Prognosen stoppen Ladesollwerte auch ohne abgeschlossenen Poll sowie vor und nach beiden Gerätequittierungsphasen. Abgelaufene oder während der Pause entwertete Pläne werden nicht wieder aufgenommen."
     - "Ein während einer Datenlücke beendeter Auftrag meldet complete oder insufficient mit neu berechneter Fehlmenge, sobald frische SOC-/Kapazitätsdaten vorliegen. Bis dahin sind Fehlmenge und Bewertungszeitpunkt unbekannt. Abschluss, Unterbrechungsgrund und nachträgliche Bewertung bleiben getrennt erkennbar; der alte Plan startet nicht erneut."
     - "Nach Auftragsende wird keine fenstergebundene Entladesperre aus dem klassischen zeitgesteuerten Laden aufgebaut."
-    - "Bei Kalibrierungsfälligkeit gelten wirksame SOC-Obergrenzen von 100 %, aber weiterhin ausschließlich der Bedarf bis PV-Start und die Tarifpreisfenster. Separates Netzladezeitfenster und Min-SOC werden nicht verwendet; eine zusätzliche ungeplante Vollladung ist ausgeschlossen."
+    - "Bei Kalibrierungsfälligkeit gelten wirksame SOC-Obergrenzen von 100 %. Überbrückungsbedarf, Mindestlademenge und Tarifpreisfenster bestimmen den Auftrag bis PV-Start. Separates Netzladezeitfenster und Min-SOC werden nicht verwendet. Eine zusätzliche ungeplante Vollladung ist ausgeschlossen."
     - "Manuelle Ladung, PV-Überschuss und ungültige Messwerte dürfen keinen konkurrierenden Auftrag erzeugen."
     - "Neustart oder geänderte auftragsrelevante Konfiguration übernimmt keinen alten Auftrag ungeprüft."
     - "Die Anzeige verwendet HA-Metadaten und Sensorattribute, berücksichtigt Sprache und HA-Zeitzone und löst keine Serviceaufrufe aus."
@@ -4894,9 +4912,9 @@ requirement_periodic_full_calibration:
     Netzladeziel wieder unmittelbar (REQ-TIMED-SOC-CHARGE).
 
     Bei der optionalen Verbrauchsplanung REQ-BRIDGE-CHARGE ist das effektive
-    Netzladeziel von 100 % ausschließlich eine Obergrenze. Der berechnete
-    Bedarf bis zum prognostizierten PV-Start bestimmt weiterhin den Auftrag
-    innerhalb der Tarifpreisfenster. Es gibt keinen Rückfall auf das
+    Netzladeziel von 100 % die Obergrenze. Der berechnete Bedarf bis zum
+    prognostizierten PV-Start und die Mindestlademenge bestimmen weiterhin
+    den Auftrag innerhalb der Tarifpreisfenster. Es gibt keinen Rückfall auf das
     separate Netzladezeitfenster oder die Min-SOC-Startschwelle und keine
     zusätzliche ungeplante Vollladung aus dem Netz. Ein ausreichend hoher
     Überbrückungsbedarf oder PV-Ladung kann 100 % erreichen.

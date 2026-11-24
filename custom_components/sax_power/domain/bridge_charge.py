@@ -10,6 +10,7 @@ from enum import StrEnum
 
 _ENERGY_EPSILON = 1e-6
 _START_BUFFER_HOURS = 10 / 60
+MIN_BRIDGE_CHARGE_ENERGY_WH = 1000
 
 
 class BridgeChargeStatus(StrEnum):
@@ -41,6 +42,7 @@ class BridgeChargePlan:
     insufficient plan can therefore contain a useful executable partial charge,
     but does not promise uninterrupted coverage. Unavailable plans have no
     energy estimates. Unknown prices rank after explicitly supplied prices.
+    ``latest_end`` is the hard deadline for reaching the minimum SOC gain.
     """
 
     status: BridgeChargeStatus
@@ -53,6 +55,8 @@ class BridgeChargePlan:
     missing_energy_wh: float | None = None
     price: float | None = None
     reason: str | None = None
+    latest_end: datetime | None = None
+    minimum_target_soc: float | None = None
 
 
 def _finite(value: object) -> bool:
@@ -111,6 +115,7 @@ def plan_bridge_charge(
     the battery gains ``charge_power_w``. Otherwise it discharges at the
     measured average down to ``min_soc``. No discharge lock is assumed.
 
+    A charge adds at least 1 kWh unless the SOC ceiling is reached first.
     If no single interval suffices, maximize the covered energy first, then
     prefer the cheapest and latest partial charge. No charge may exceed the
     SOC ceiling or extend beyond its interval or PV start.
@@ -177,27 +182,43 @@ def plan_bridge_charge(
         )
 
     duration_needed = required / (power + discharge)
+    minimum_duration = MIN_BRIDGE_CHARGE_ENERGY_WH / power
+    discharge_duration = available / discharge
     candidates: list[BridgeChargePlan] = []
     for window in _merged_windows(windows):
         start = max(0.0, (window.start.astimezone(UTC) - now).total_seconds() / 3600)
         end = min(horizon, (window.end.astimezone(UTC) - now).total_seconds() / 3600)
         if start >= end:
             continue
-        # Capacity headroom grows until the battery reaches its SOC floor.
-        # Equating that lower start bound with end-duration gives the third
-        # bound. The last bound prevents buying energy unusable before PV.
-        duration = min(
-            duration_needed,
-            end - start,
+        # Headroom grows until the battery reaches its SOC floor. Equating
+        # that lower start bound with end-duration gives the second limit.
+        capacity_limit = min(
             maximum / power,
             (discharge * end + maximum - available) / (power + discharge),
-            discharge * (horizon - start) / (power + discharge),
+        )
+        time_limit = end - start
+        if (
+            power * time_limit < MIN_BRIDGE_CHARGE_ENERGY_WH - _ENERGY_EPSILON
+            and power * (capacity_limit - time_limit) > _ENERGY_EPSILON
+        ):
+            continue
+        useful_duration = discharge * (horizon - start) / (power + discharge)
+        duration = min(
+            max(minimum_duration, min(duration_needed, useful_duration)),
+            time_limit,
+            capacity_limit,
         )
         if duration <= 0:
             continue
+        # The minimum can leave energy for after PV starts. In that case,
+        # starting after the estimated empty time can only increase the gap.
         latest_start = min(
             end - duration,
-            horizon - (power + discharge) * duration / discharge,
+            max(
+                start,
+                discharge_duration,
+                horizon - (power + discharge) * duration / discharge,
+            ),
         )
         charged = power * duration
         # Starting earlier leaves more energy in the battery. Keep enough
@@ -207,9 +228,18 @@ def plan_bridge_charge(
             latest_start,
             max(start, headroom_start, latest_start - _START_BUFFER_HOURS),
         )
-        before_charge = max(available - discharge * buffered_start, 0.0)
-        missing = max(required - (power + discharge) * duration, 0.0)
+        demand_before = discharge * buffered_start
+        before_charge = max(available - demand_before, 0.0)
+        # Surplus from the minimum charge cannot cover a gap before charging.
+        missing = max(
+            demand_before - available,
+            required - (power + discharge) * duration,
+            0.0,
+        )
         complete = missing <= _ENERGY_EPSILON
+        target_soc = min(
+            max_soc, min_soc + (before_charge + charged) / capacity_wh * 100
+        )
         candidates.append(
             BridgeChargePlan(
                 (
@@ -220,14 +250,18 @@ def plan_bridge_charge(
                 discharge_until=discharge_until,
                 start=now + timedelta(hours=buffered_start),
                 end=now + timedelta(hours=buffered_start + duration),
-                target_soc=min(
-                    max_soc, min_soc + (before_charge + charged) / capacity_wh * 100
-                ),
+                target_soc=target_soc,
                 required_energy_wh=required,
                 charge_energy_wh=charged,
                 missing_energy_wh=0.0 if complete else missing,
                 price=window.price,
                 reason=None if complete else "window_or_capacity_insufficient",
+                latest_end=min(pv_start, window.end),
+                minimum_target_soc=min(
+                    target_soc,
+                    min_soc
+                    + (before_charge + MIN_BRIDGE_CHARGE_ENERGY_WH) / capacity_wh * 100,
+                ),
             )
         )
     if not candidates:
@@ -243,6 +277,7 @@ def plan_bridge_charge(
         candidates,
         key=lambda plan: (
             plan.missing_energy_wh,
+            plan.charge_energy_wh < MIN_BRIDGE_CHARGE_ENERGY_WH - _ENERGY_EPSILON,
             float("inf") if plan.price is None else plan.price,
             -plan.start.timestamp(),
         ),

@@ -852,9 +852,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         bridge = self.bridge_charge_enabled
         deadline = (
-            session.plan.end
-            if bridge and session.plan is not None
-            else None if bridge else self._active_charge_deadline()
+            session.deadline_at(now, measurements if fresh else None)
+            if bridge
+            else self._active_charge_deadline()
         )
         window = (
             max(0.0, (deadline - now).total_seconds()) if deadline is not None else None
@@ -885,9 +885,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             capacity_wh=measurements.get("battery_capacity"),
             soc=measurements.get("battery_soc"),
             target_soc=(
-                session.plan.target_soc
-                if bridge and session.plan is not None
-                else None if bridge else self.effective_timed_charge_max_soc
+                session.target_soc_at(now)
+                if bridge
+                else self.effective_timed_charge_max_soc
             ),
             max_soc=self.effective_timed_charge_max_soc,
             window_seconds=window,
@@ -1073,6 +1073,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         max_soc = self.effective_timed_charge_max_soc
         measurements_fresh = self._timed_discharge_measurements_fresh()
         completion_data = data if measurements_fresh else None
+        if session.started and data["soc"] >= max_soc:
+            session.finish_at_soc_limit(now, completion_data)
+            return False
         observation = data.get("discharge_forecast_attributes") or {}
         retain_observation = session.started or (
             session.completed_at is not None
@@ -4091,11 +4094,22 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._sun_charge_write_task = None
 
     def _active_charge_deadline(self) -> datetime | None:
-        return (
-            self._bridge_charge_deadline
-            or self._tariff_charge_deadline
-            or self._price_charge_deadline
-        )
+        if self._bridge_charge_deadline is not None:
+            return self._bridge_deadline_at(dt_util.utcnow())
+        return self._tariff_charge_deadline or self._price_charge_deadline
+
+    def _bridge_deadline_at(self, now: datetime) -> datetime | None:
+        deadline = self._bridge_charge_deadline
+        plan = self._bridge_session.plan
+        if (
+            deadline is not None
+            and now >= deadline
+            and plan is not None
+            and plan.end == deadline
+            and self._timed_discharge_measurements_fresh()
+        ):
+            return self._bridge_session.deadline_at(now, self._high_data)
+        return deadline
 
     def _price_charge_permission_valid(self) -> bool:
         return (
@@ -4125,6 +4139,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             is not None
         )
 
+    def _bridge_charge_at_soc_limit(self) -> bool:
+        soc = self._basic_data.get("soc", self._last_observed_soc)
+        return soc is not None and soc >= self.effective_timed_charge_max_soc
+
     def _check_timed_charge_write(self, power: int) -> None:
         """Late ACKs cannot authorize an expired plan or changed tariff window."""
         if power < 0 and self._tariff_control_revision != self._tariff_source_revision:
@@ -4149,18 +4167,19 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise HomeAssistantError("Niedertarifzeit abgelaufen oder Tarif geändert")
         if power < 0 and not self._price_charge_permission_valid():
             raise HomeAssistantError("Ausgewähltes Preis-Ladeintervall abgelaufen")
-        if (
-            power < 0
-            and self._bridge_charge_deadline is not None
-            and (
-                dt_util.utcnow() >= self._bridge_charge_deadline
+        if power < 0 and self._bridge_charge_deadline is not None:
+            now = dt_util.utcnow()
+            deadline = self._bridge_deadline_at(now)
+            if (
+                deadline is None
+                or now >= deadline
+                or self._bridge_charge_at_soc_limit()
                 or not self._timed_discharge_measurements_fresh()
                 or not self._bridge_charge_forecast_available()
-            )
-        ):
-            raise HomeAssistantError(
-                "Ladeplan abgelaufen, Messdaten veraltet oder PV-Prognose fehlt"
-            )
+            ):
+                raise HomeAssistantError(
+                    "Ladeplan abgelaufen, Messdaten veraltet oder PV-Prognose fehlt"
+                )
 
     async def _async_write_sun_charge_setpoint_unlocked(
         self,
@@ -4451,8 +4470,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             self._bridge_charge_deadline is not None
                             and not self._bridge_charge_forecast_available()
                         )
+                        bridge_soc_limit_reached = (
+                            self._bridge_charge_deadline is not None
+                            and self._bridge_charge_at_soc_limit()
+                        )
                         if deadline is not None and (
                             dt_util.utcnow() >= deadline
+                            or bridge_soc_limit_reached
                             or not self._tariff_charge_permission_valid()
                             or (
                                 self._bridge_charge_deadline is not None
@@ -4470,23 +4494,29 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                     not self._basic_read_failed
                                     and self._timed_discharge_measurements_fresh()
                                 )
-                                self._bridge_session.wait_for_data(
-                                    dt_util.utcnow(),
-                                    (
-                                        "pv_start_missing"
-                                        if bridge_forecast_missing
-                                        else (
-                                            "measurements_missing"
-                                            if not bridge_measurements_fresh
-                                            else None
-                                        )
-                                    ),
-                                    data=(
-                                        self._high_data
-                                        if bridge_measurements_fresh
-                                        else None
-                                    ),
+                                completion_data = (
+                                    self._high_data
+                                    if bridge_measurements_fresh
+                                    else None
                                 )
+                                if bridge_soc_limit_reached:
+                                    self._bridge_session.finish_at_soc_limit(
+                                        dt_util.utcnow(), completion_data
+                                    )
+                                else:
+                                    self._bridge_session.wait_for_data(
+                                        dt_util.utcnow(),
+                                        (
+                                            "pv_start_missing"
+                                            if bridge_forecast_missing
+                                            else (
+                                                "measurements_missing"
+                                                if not bridge_measurements_fresh
+                                                else None
+                                            )
+                                        ),
+                                        data=completion_data,
+                                    )
                             self._bridge_charge_deadline = None
                             self._tariff_charge_deadline = None
                             self._price_charge_deadline = None

@@ -68,6 +68,16 @@ async def coordinator(hass: HomeAssistant) -> AsyncIterator[SaxPowerCoordinator]
     await instance.async_shutdown()
 
 
+def _end_low_tariff(coordinator: SaxPowerCoordinator, end: str) -> None:
+    coordinator.options = dict(coordinator.options) | {
+        "economics_tou_window_1": {
+            "start": "00:00:00",
+            "end": end,
+            "price_eur_kwh": 0.1,
+        },
+    }
+
+
 def _data(
     now: datetime, *, soc: float = 10, observation: bool = True
 ) -> dict[str, Any]:
@@ -76,7 +86,7 @@ def _data(
         "battery_soc": soc,
         "battery_soc_min": 10,
         "battery_capacity": 10000,
-        "ic_max_power_reference": 1000,
+        "ic_max_power_reference": 2000,
         "smartmeter_power": 500,
         "storage_power_active": 1000,
         "discharge_forecast_attributes": (
@@ -131,12 +141,12 @@ async def test_planned_charge_replaces_min_soc_trigger_and_survives_forecast_res
 async def test_buffered_bridge_plan_starts_writing_at_published_start(
     coordinator: SaxPowerCoordinator,
 ) -> None:
-    """REQ-BRIDGE-CHARGE: 500 Wh last 30 minutes at 1 kW, so start at minute 20."""
+    """REQ-BRIDGE-CHARGE: One kWh takes 30 minutes at 2 kW."""
     coordinator.async_start_sun_charge = (
         SaxPowerCoordinator.async_start_sun_charge.__get__(coordinator)
     )
     start = NOW + timedelta(minutes=20)
-    end = start + timedelta(minutes=15)
+    end = start + timedelta(minutes=30)
     for when in (NOW, start - timedelta(seconds=1), start):
         soc = 15 - (when - NOW) / timedelta(minutes=6)
         await _evaluate(coordinator, when, _data(when, soc=soc))
@@ -210,7 +220,7 @@ async def test_data_gap_cannot_resume_expired_or_invalidated_bridge_plan(
     """REQ-BRIDGE-CHARGE: A pause never extends a plan or its authorization."""
     await _evaluate(coordinator, NOW, _data(NOW))
     plan = coordinator._bridge_session.plan
-    assert plan is not None and plan.end is not None
+    assert plan is not None and plan.latest_end is not None
     interrupted = NOW + timedelta(minutes=2)
     coordinator._pv_bridge_forecast.pv_start.return_value = None
     await _evaluate(
@@ -220,7 +230,9 @@ async def test_data_gap_cannot_resume_expired_or_invalidated_bridge_plan(
     if invalidate == "configuration":
         coordinator._max_soc = 12
     recovered = (
-        plan.end if invalidate == "deadline" else interrupted + timedelta(seconds=2)
+        plan.latest_end
+        if invalidate == "deadline"
+        else interrupted + timedelta(seconds=2)
     )
     coordinator._pv_bridge_forecast.pv_start.return_value = NOW + timedelta(hours=1)
     coordinator.async_start_sun_charge.reset_mock()
@@ -311,20 +323,21 @@ async def test_plan_expiring_during_gap_requires_a_minute_before_replanning(
     coordinator: SaxPowerCoordinator,
 ) -> None:
     """REQ-BRIDGE-CHARGE: An outage cannot bypass the post-charge observation wait."""
+    coordinator._timed_charge_max_soc = 10.25
     coordinator._pv_bridge_forecast.pv_start.return_value = NOW + timedelta(minutes=1)
     await _evaluate(coordinator, NOW, _data(NOW))
     plan = coordinator._bridge_session.plan
-    assert plan is not None and plan.end == NOW + timedelta(seconds=30)
+    assert plan is not None and plan.latest_end == NOW + timedelta(minutes=1)
     coordinator._pv_bridge_forecast.pv_start.return_value = None
-    await _evaluate(coordinator, plan.end, _data(plan.end))
+    await _evaluate(coordinator, plan.latest_end, _data(plan.latest_end))
     assert not coordinator._bridge_session.started
-    coordinator._pv_bridge_forecast.pv_start.return_value = NOW + timedelta(minutes=1)
-    recovered = plan.end + timedelta(seconds=2)
+    coordinator._pv_bridge_forecast.pv_start.return_value = NOW + timedelta(hours=1)
+    recovered = plan.latest_end + timedelta(seconds=2)
     coordinator.async_start_sun_charge.reset_mock()
     await _evaluate(coordinator, recovered, _data(recovered))
     assert not coordinator._timed_charge_active
     assert coordinator._bridge_session.plan is plan
-    assert coordinator._bridge_session.completed_at == plan.end
+    assert coordinator._bridge_session.completed_at == plan.latest_end
     coordinator.async_start_sun_charge.assert_not_awaited()
 
 
@@ -391,20 +404,18 @@ async def test_no_charge_if_existing_energy_covers_until_pv(
 
 
 @pytest.mark.parametrize(
-    ("capacity_wh", "required_wh", "charge_minutes"),
-    [(5000, 500, 15), (7500, 250, 7.5), (10000, 0, 0)],
+    ("capacity_wh", "required_wh"),
+    [(5000, 500), (7500, 250), (10000, 0)],
 )
 async def test_device_capacity_reduces_bridge_charge_demand(
     coordinator: SaxPowerCoordinator,
     capacity_wh: int,
     required_wh: int,
-    charge_minutes: float,
 ) -> None:
     """REQ-BRIDGE-CHARGE: equal SOC stores more usable energy at higher capacity.
 
     At 20 % SOC and a 10 % floor, existing energy must cover one hour at 1 kW.
-    While charging, the grid also supplies the house, halving the charge time
-    required for the remaining deficit at 1 kW battery charge power.
+    A remaining deficit schedules the one-kWh minimum with 2 kW charging power.
     """
     data = _data(NOW, soc=20)
     data["battery_capacity"] = capacity_wh
@@ -414,16 +425,17 @@ async def test_device_capacity_reduces_bridge_charge_demand(
     plan = coordinator._bridge_session.plan
     assert plan is not None
     assert plan.required_energy_wh == required_wh
-    assert plan.charge_energy_wh == pytest.approx(charge_minutes / 60 * 1000)
     assert plan.missing_energy_wh == 0
-    if charge_minutes:
+    if required_wh:
+        assert plan.charge_energy_wh == pytest.approx(1000)
         assert plan.start is not None and plan.end is not None
-        assert plan.end - plan.start == timedelta(minutes=charge_minutes)
+        assert plan.end - plan.start == timedelta(minutes=30)
         assert coordinator.data["bridge_charge_plan"] == "planned"
         attributes = coordinator.data["bridge_charge_plan_attributes"]
         assert attributes["charge_start"] == plan.start.isoformat()
         assert attributes["charge_end"] == plan.end.isoformat()
     else:
+        assert plan.charge_energy_wh == 0
         assert plan.start is None and plan.end is None
         assert coordinator.data["bridge_charge_plan"] == "not_needed"
     coordinator.async_start_sun_charge.assert_not_awaited()
@@ -452,10 +464,33 @@ async def test_basic_soc_rounding_does_not_replace_precise_plan_target(
 ) -> None:
     await _evaluate(coordinator, NOW, _data(NOW))
     later = NOW + timedelta(minutes=29)
-    await _evaluate(coordinator, later, _data(later, soc=14.9, observation=False))
-    assert coordinator._bridge_session.plan.target_soc == 15
-    assert coordinator.data["soc"] == 15
+    await _evaluate(coordinator, later, _data(later, soc=19.9, observation=False))
+    assert coordinator._bridge_session.plan.target_soc == 20
+    assert coordinator.data["soc"] == 20
     assert coordinator._timed_charge_active
+
+
+async def test_basic_soc_at_network_limit_finishes_bridge_after_planned_end(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: The network SOC ceiling still applies to an extension."""
+    coordinator._timed_charge_max_soc = 20
+    await _evaluate(coordinator, NOW, _data(NOW))
+    plan = coordinator._bridge_session.plan
+    assert coordinator._timed_charge_active
+    assert plan is not None and plan.end is not None and plan.latest_end is not None
+    now = plan.end + timedelta(seconds=2)
+    assert now < plan.latest_end
+    coordinator._basic_data["soc"] = 20
+    coordinator.async_start_sun_charge.reset_mock()
+    coordinator.async_stop_sun_charge.reset_mock()
+
+    await _evaluate(coordinator, now, _data(now, soc=19.9, observation=False))
+
+    assert not coordinator._timed_charge_active
+    assert coordinator._bridge_session.completed_at == now
+    coordinator.async_start_sun_charge.assert_not_awaited()
+    coordinator.async_stop_sun_charge.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
@@ -522,6 +557,7 @@ async def test_new_mode_clears_legacy_discharge_hold(
 async def test_writer_enforces_expiry_without_poll(
     coordinator: SaxPowerCoordinator,
 ) -> None:
+    _end_low_tariff(coordinator, "00:30:00")
     await _evaluate(coordinator, NOW, _data(NOW))
     deadline = coordinator._bridge_charge_deadline
     with (
@@ -537,6 +573,91 @@ async def test_writer_enforces_expiry_without_poll(
     )
     assert not coordinator._timed_charge_active
     assert coordinator._bridge_charge_deadline is None
+
+
+@pytest.mark.parametrize("stop", ["minimum", "tariff_end"])
+async def test_writer_continues_toward_minimum_after_planned_end_without_poll(
+    coordinator: SaxPowerCoordinator, stop: str
+) -> None:
+    """REQ-BRIDGE-CHARGE: Only the authorized window may cover a slow charge."""
+    _end_low_tariff(coordinator, "00:45:00")
+    await _evaluate(coordinator, NOW, _data(NOW))
+    plan = coordinator._bridge_session.plan
+    assert plan is not None and plan.end == NOW + timedelta(minutes=30)
+    assert plan.latest_end == NOW + timedelta(minutes=45)
+    cutoff = plan.end + timedelta(seconds=2) if stop == "minimum" else plan.latest_end
+    clock = plan.end
+    coordinator._sun_charge_power = MIN_SETPOINT_POWER
+    coordinator._high_data = _data(clock, soc=19.9, observation=False)
+    sleeps = 0
+
+    async def advance_after_first_write(_interval: float) -> None:
+        nonlocal clock, sleeps
+        sleeps += 1
+        assert sleeps <= 2
+        if sleeps == 2:
+            clock = cutoff
+            coordinator._high_data = _data(
+                clock, soc=20 if stop == "minimum" else 19.9, observation=False
+            )
+
+    with (
+        patch(
+            "custom_components.sax_power.coordinator.asyncio.sleep",
+            side_effect=advance_after_first_write,
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow",
+            side_effect=lambda: clock,
+        ),
+        patch(_CLOCK, return_value=100),
+    ):
+        await coordinator._async_sun_charge_loop()
+
+    assert [
+        call.args for call in coordinator.async_write_extended_register.await_args_list
+    ] == [
+        (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT),
+        (REG_SUN_IC_POWER_SETPOINT_PCT, to_unsigned16(-10000)),
+        (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER),
+    ]
+    assert not coordinator._timed_charge_active
+    assert coordinator._bridge_charge_deadline is None
+    assert coordinator._bridge_session.completed_at == cutoff
+
+
+async def test_writer_finishes_extension_at_basic_network_soc_limit_without_poll(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: Basic SOC can revoke a periodic charging write."""
+    coordinator._timed_charge_max_soc = 20
+    await _evaluate(coordinator, NOW, _data(NOW))
+    plan = coordinator._bridge_session.plan
+    assert coordinator._timed_charge_active
+    assert plan is not None and plan.end is not None and plan.latest_end is not None
+    now = plan.end + timedelta(seconds=2)
+    assert now < plan.latest_end
+    coordinator._sun_charge_power = MIN_SETPOINT_POWER
+    coordinator._basic_data["soc"] = 20
+    coordinator._high_data = _data(now, soc=19.9, observation=False)
+
+    with (
+        patch(
+            "custom_components.sax_power.coordinator.asyncio.sleep",
+            side_effect=[None, AssertionError("Writer still active after SOC limit")],
+        ),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow", return_value=now
+        ),
+        patch(_CLOCK, return_value=100),
+    ):
+        await coordinator._async_sun_charge_loop()
+
+    coordinator.async_write_extended_register.assert_awaited_once_with(
+        REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER
+    )
+    assert not coordinator._timed_charge_active
+    assert coordinator._bridge_session.completed_at == now
 
 
 async def test_writer_pauses_on_missing_forecast_without_poll(
@@ -690,7 +811,7 @@ async def test_replanning_uses_same_new_consumption_for_pv_and_energy(
     await _evaluate(coordinator, NOW, _data(NOW))
     end = coordinator._bridge_charge_deadline
     assert end is not None
-    await _evaluate(coordinator, end, _data(end, soc=15, observation=False))
+    await _evaluate(coordinator, end, _data(end, soc=20, observation=False))
     next_time = end + timedelta(minutes=1)
     data = _data(next_time, soc=14)
     data["discharge_forecast_attributes"]["average_discharge_w"] = 2000
@@ -706,6 +827,7 @@ async def test_deadline_with_missing_pv_reports_measured_completion(
     coordinator: SaxPowerCoordinator, soc: float, status: str, shortfall: float
 ) -> None:
     """REQ-BRIDGE-CHARGE: Forecast gaps cannot hide a charge shortfall (#252)."""
+    _end_low_tariff(coordinator, "00:30:00")
     await _evaluate(coordinator, NOW, _data(NOW))
     plan = coordinator._bridge_session.plan
     assert plan is not None and plan.end is not None
@@ -735,6 +857,7 @@ async def test_expired_plan_defers_completion_until_measurements_recover(
     coordinator: SaxPowerCoordinator, gap: str, recovery_soc: float
 ) -> None:
     """REQ-BRIDGE-CHARGE: Unknown energy is never replaced by cached plan zero."""
+    _end_low_tariff(coordinator, "00:30:00")
     await _evaluate(coordinator, NOW, _data(NOW))
     plan = coordinator._bridge_session.plan
     assert plan is not None and plan.end is not None
@@ -780,16 +903,19 @@ async def test_target_soc_with_missing_pv_finishes_frozen_plan_before_deadline(
     coordinator: SaxPowerCoordinator,
 ) -> None:
     """REQ-BRIDGE-CHARGE: Fresh target feedback also ends a paused charge."""
+    _end_low_tariff(coordinator, "00:25:00")
+    coordinator._timed_charge_max_soc = 15
     await _evaluate(coordinator, NOW, _data(NOW))
+    assert coordinator._bridge_session.started
     coordinator._pv_bridge_forecast.pv_start.return_value = None
-    finished = NOW + timedelta(minutes=20)
+    finished = NOW + timedelta(minutes=10)
     await _evaluate(coordinator, finished, _data(finished, soc=15, observation=False))
     assert not coordinator._bridge_session.started
     assert coordinator._bridge_session.completed_at == finished
     assert coordinator.data["bridge_charge_plan"] == "insufficient"
     assert coordinator.data["bridge_charge_plan_attributes"][
         "shortfall_kwh"
-    ] == pytest.approx(1 / 6)
+    ] == pytest.approx(1 / 3)
 
 
 @pytest.mark.parametrize("pv_available", [True, False])
@@ -797,6 +923,7 @@ async def test_completion_needs_no_charge_power_reference(
     coordinator: SaxPowerCoordinator, pv_available: bool
 ) -> None:
     """REQ-BRIDGE-CHARGE: Actual remaining energy does not need a charging rate."""
+    _end_low_tariff(coordinator, "00:30:00")
     await _evaluate(coordinator, NOW, _data(NOW))
     plan = coordinator._bridge_session.plan
     assert plan is not None and plan.end is not None
@@ -816,6 +943,7 @@ async def test_writer_expiry_uses_only_fresh_measurements_for_completion(
     coordinator: SaxPowerCoordinator, measurements_fresh: bool
 ) -> None:
     """REQ-BRIDGE-CHARGE: Deadline enforcement and polls share the same verdict."""
+    _end_low_tariff(coordinator, "00:30:00")
     await _evaluate(coordinator, NOW, _data(NOW))
     deadline = coordinator._bridge_charge_deadline
     assert deadline is not None
@@ -854,6 +982,7 @@ async def test_invalid_new_consumption_cannot_erase_completed_plan(
     coordinator: SaxPowerCoordinator,
 ) -> None:
     """REQ-BRIDGE-CHARGE: Invalid new demand leaves the prior verdict reviewable."""
+    _end_low_tariff(coordinator, "00:30:00")
     await _evaluate(coordinator, NOW, _data(NOW))
     deadline = coordinator._bridge_charge_deadline
     assert deadline is not None
@@ -910,16 +1039,16 @@ async def test_live_charge_progress_updates_without_mutating_frozen_plan(
     first = _publish_at(coordinator, NOW, data)
     assert first["charging_active"] is True
     assert first["charging_power_w"] == 2000
-    assert first["charging_target_soc"] == 15
+    assert first["charging_target_soc"] == 20
     assert first["charging_max_soc"] == 80
-    assert first["charging_remaining_seconds"] == 900
+    assert first["charging_remaining_seconds"] == 1800
     later = NOW + timedelta(minutes=2)
     next_data = _data(later, soc=12, observation=False) | {
         "storage_power_active": -4000
     }
     updated = _publish_at(coordinator, later, next_data)
     assert updated["charging_power_w"] == 4000
-    assert updated["charging_remaining_seconds"] == 270
+    assert updated["charging_remaining_seconds"] == 720
     assert coordinator._bridge_session.attributes == frozen
     coordinator.async_start_sun_charge.reset_mock()
     coordinator.async_write_extended_register.reset_mock()
@@ -1007,7 +1136,9 @@ async def test_inactive_or_unmeasured_charge_clears_all_live_progress(
         await asyncio.gather(coordinator._sun_charge_task, return_exceptions=True)
     elif unavailable == "zero_setpoint":
         coordinator._sun_charge_power = 0
-    now = coordinator._bridge_charge_deadline if unavailable == "end" else NOW
+    plan = coordinator._bridge_session.plan
+    assert plan is not None
+    now = plan.latest_end if unavailable == "end" else NOW
     assert now is not None
     attributes = _publish_at(coordinator, now, data)
     assert attributes["charging_active"] is False
@@ -1078,7 +1209,7 @@ async def test_completed_charge_returns_to_current_status_without_old_eta(
     await _evaluate(coordinator, NOW, _data(NOW) | {"storage_power_active": -2000})
     deadline = coordinator._bridge_charge_deadline
     assert deadline is not None
-    data = _data(deadline, soc=15, observation=False) | {"storage_power_active": 1000}
+    data = _data(deadline, soc=20, observation=False) | {"storage_power_active": 1000}
     await _evaluate(coordinator, deadline, data)
     attributes = data["bridge_charge_plan_attributes"]
     assert data["bridge_charge_plan"] == "complete"

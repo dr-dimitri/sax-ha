@@ -165,6 +165,45 @@ def test_actual_energy_shortfall_is_reported_when_deadline_expires() -> None:
     assert session.attributes["shortfall_kwh"] == pytest.approx(1.2)
 
 
+def test_slow_charge_continues_past_estimated_end_until_minimum_soc() -> None:
+    session = _started()
+    assert session.plan is not None and session.plan.end is not None
+    nominal_end = session.plan.end
+    assert _prepare(
+        session, now=nominal_end, observation={}, data={"battery_soc": 19.9}
+    )
+    assert session.target_soc_at(nominal_end) == 20
+    finished = nominal_end + timedelta(minutes=1)
+    assert not _prepare(session, now=finished, observation={}, data={"battery_soc": 20})
+    assert session.completed_at == finished
+
+
+@pytest.mark.parametrize("limit", ["tariff", "pv"])
+def test_slow_charge_still_stops_at_hard_deadline(limit: str) -> None:
+    session = BridgeChargeSession()
+    hard_end = NOW + timedelta(minutes=45)
+    settings = (
+        {
+            "pv_start": NOW + timedelta(hours=1),
+            "windows": [ChargeWindow(NOW, hard_end)],
+        }
+        if limit == "tariff"
+        else {"pv_start": hard_end}
+    )
+    assert _prepare(session, **settings)
+    session.mark_started()
+    assert session.plan is not None
+    assert session.plan.end == NOW + timedelta(minutes=30)
+    almost_done = hard_end - timedelta(seconds=1)
+    assert _prepare(
+        session, now=almost_done, observation={}, data={"battery_soc": 19}, **settings
+    )
+    assert not _prepare(
+        session, now=hard_end, observation={}, data={"battery_soc": 19}, **settings
+    )
+    assert session.completed_at == hard_end
+
+
 def test_configuration_change_invalidates_frozen_plan_without_fresh_demand() -> None:
     session = _started()
     assert not _prepare(
@@ -184,13 +223,13 @@ def test_configuration_change_replans_when_new_observation_is_available() -> Non
     assert _prepare(
         session,
         now=NOW + timedelta(minutes=1),
-        max_soc=20,
+        max_soc=19,
         fingerprint="lower_ceiling",
         windows=[ChargeWindow(NOW, NOW + timedelta(minutes=30))],
     )
     assert session.plan is not original
     assert session.status == "insufficient" and not session.started
-    assert session.plan is not None and session.plan.target_soc <= 20
+    assert session.plan is not None and session.plan.target_soc == pytest.approx(19)
 
 
 def test_pause_can_resume_same_frozen_plan_without_extending_deadline() -> None:
@@ -234,23 +273,24 @@ def test_unstarted_paused_plan_needs_current_observations_to_resume() -> None:
 
 def test_short_charge_cannot_immediately_reuse_its_precharge_history() -> None:
     session = BridgeChargeSession()
-    assert _prepare(session, pv_start=NOW + timedelta(minutes=2))
+    settings = {"pv_start": NOW + timedelta(minutes=2), "max_soc": 10.1}
+    assert _prepare(session, **settings)
     session.mark_started()
     assert session.plan is not None and session.plan.end is not None
     deadline = session.plan.end
-    assert deadline == NOW + timedelta(seconds=24)
-    assert not _prepare(session, now=deadline, pv_start=NOW + timedelta(minutes=2))
+    assert deadline == NOW + timedelta(seconds=18)
+    assert not _prepare(session, now=deadline, data={"battery_soc": 10.1}, **settings)
     completed = session.plan
     assert not _prepare(
         session,
         now=deadline + timedelta(seconds=59),
-        pv_start=NOW + timedelta(minutes=2),
+        **settings,
     )
     assert session.plan is completed
     assert _prepare(
         session,
         now=deadline + timedelta(seconds=60),
-        pv_start=NOW + timedelta(minutes=2),
+        **settings,
     )
     assert session.plan is not completed
     assert session.completed_at is None and not session.started
@@ -437,7 +477,7 @@ def test_completion_waits_for_valid_measurements_then_assesses_once(
 def test_deferred_completion_keeps_cooldown_when_pv_recovers() -> None:
     """REQ-BRIDGE-CHARGE: Completing a gap must not reuse precharge history."""
     session = BridgeChargeSession()
-    assert _prepare(session, pv_start=NOW + timedelta(minutes=2))
+    assert _prepare(session, pv_start=NOW + timedelta(minutes=2), max_soc=10.1)
     session.mark_started()
     assert session.plan is not None and session.plan.end is not None
     plan = session.plan

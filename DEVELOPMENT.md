@@ -1097,17 +1097,21 @@ verwenden. Die bestehende dynamische Preissteuerung ist nicht daran angebunden.
 
 Der Bedarf ergibt sich aus dem Verbrauch bis PV-Start abzüglich der nutzbaren
 Batterieenergie oberhalb der Geräte-SOC-Untergrenze. Während Netzladung wird
-Hausverbrauch aus dem Netz gedeckt; deshalb berücksichtigt die Berechnung sowohl
-den Energiezuwachs im Speicher als auch die in dieser Zeit vermiedene Entladung.
-Das Ladeziel bleibt unter dem effektiven Netzlade-Max-SOC. Geplant wird jeweils
-ein zusammenhängender Auftrag: unter ausreichenden Kandidaten zuerst der
-günstigste, bei gleichem Preis der späteste mögliche Start. Die Planung zieht
-den gesamten Ladeblock von dort um bis zu zehn Minuten vor. Der früheste Start
-liegt im Tarifabschnitt und setzt genug freie Kapazität für die geplante
-Lademenge voraus. Das Ziel-SOC folgt aus der Restenergie zu diesem Start und
-der geplanten Lademenge. Reicht kein Kandidat aus,
-wählt die Domain die größte mögliche Bedarfsdeckung und weist den verbleibenden
-Fehlbetrag aus. Ein solcher Teilplan verspricht keine vollständige Überbrückung.
+Hausverbrauch aus dem Netz gedeckt. Die Berechnung berücksichtigt den
+Energiezuwachs im Speicher und die in dieser Zeit vermiedene Entladung.
+Solange ein Bedarf besteht, beträgt der geplante Zuwachs mindestens 1 kWh.
+Der freie Platz bis zum effektiven Netzlade-Max-SOC begrenzt diese Mindestmenge.
+Ist der Tarifabschnitt bis zum PV-Start für die gegebenenfalls begrenzte
+Mindestmenge zu kurz, gibt die Domain ihn nicht zum Laden frei.
+Ein Auftrag ist zusammenhängend. Bei gleicher Bedarfsdeckung hat ein Auftrag
+mit mindestens 1 kWh Vorrang. Danach entscheiden der günstigste Tarifabschnitt
+und bei gleichem Preis der späteste mögliche Start.
+Die Planung zieht den gesamten Ladeblock von dort um bis zu zehn Minuten vor.
+Der Start liegt im Tarifabschnitt und setzt genug freie Kapazität für die
+geplante Lademenge voraus. Das Ziel-SOC folgt aus der Restenergie zu diesem
+Start und der geplanten Lademenge. Reicht kein Kandidat aus, wählt die Domain
+die größte mögliche Bedarfsdeckung und weist den verbleibenden Fehlbetrag aus.
+Eine Versorgungslücke vor dem Ladestart zählt zum Fehlbetrag.
 
 `application/bridge_inputs.py` adaptiert ausschließlich die tatsächlich
 vorkommenden billigsten Preisstufen des gespeicherten `TIME_OF_USE`-Tarifs auf
@@ -1195,9 +1199,17 @@ damit Aus-/Einschalten oder vorübergehend geänderte SOC-Grenzen keinen alten
 Auftrag über den Ausfall hinweg erhalten.
 Die PV-Verfügbarkeit wird zusätzlich im periodischen Writer und vor sowie
 nach den beiden Gerätequittierungen geprüft.
-Festes Ende oder erreichtes Ziel beenden den Auftrag;
-eine Neuplanung benötigt mindestens eine Minute nach Abschluss und wieder
-gültige Beobachtungen, auch beim Ablauf während einer Datenlücke.
+Bei planmäßigem Verlauf beenden das erreichte SOC-Ziel oder das geplante
+Ende den Auftrag. Maßgeblich für das Mindestziel ist der gemessene SOC-Zuwachs
+seit Beginn der Ladung. Die Kapazität bestimmt den zu 1 kWh passenden
+SOC-Zuwachs und das effektive Netzlade-Max-SOC begrenzt ihn. Zeigen frische
+Messwerte am geplanten Ende einen kleineren Zuwachs, darf dieselbe Ladung
+bis zum Erreichen des Mindestziels weiterlaufen. Das Ende des ursprünglich
+erlaubten Tarifabschnitts und der gebundene PV-Start sind harte Grenzen.
+Ein oberhalb der Mindestmenge liegendes Planziel wird nach dem geplanten
+Ende nur bis zum Erreichen des Mindestziels verfolgt. Eine Neuplanung
+benötigt mindestens eine Minute nach Abschluss und wieder gültige
+Beobachtungen, auch beim Ablauf während einer Datenlücke.
 Eine gemeinsame Abschlussbewertung berechnet den verbleibenden Bedarf bis
 zum gebundenen PV-Start mit dem festgehaltenen Verbrauch und frischem
 Batterie-SOC, Geräte-Minimal-SOC und Kapazität. Eine fehlende aktuelle
@@ -1216,9 +1228,9 @@ Betriebsart nicht aufgebaut: Nach dem begrenzten Laden wird normale Entladung
 wieder möglich. Die bestehenden Schutz- und Prioritätsregeln für manuelle
 Ladung, PV-Überschuss und Max-SOC gelten weiterhin. Bei fälliger Zellkalibrierung
 steigen `effective_max_soc` und `effective_timed_charge_max_soc` auf 100 %;
-dies erweitert lediglich die Obergrenzen der Verbrauchsplanung. Bedarf,
-PV-Zeitpunkt und erlaubte Tarifintervalle bestimmen weiterhin den begrenzten
-Auftrag. Es gibt weder einen Rückfall auf das ausgeblendete Netzladezeitfenster
+dies erweitert die Obergrenzen der Verbrauchsplanung. Bedarf, Mindestmenge,
+PV-Zeitpunkt und erlaubte Tarifintervalle bestimmen weiterhin den Auftrag.
+Es gibt weder einen Rückfall auf das ausgeblendete Netzladezeitfenster
 oder Min-SOC noch eine zusätzliche ungeplante Netzladung bis 100 %. PV oder ein
 entsprechend hoher Überbrückungsbedarf können 100 % erreichen. Außerhalb dieser
 Betriebsart bleibt die bestehende Kalibrierungssteuerung unverändert.
@@ -1230,8 +1242,8 @@ Strukturierte Attribute liefern `observation_minutes`, `average_discharge_w`,
 `shortfall_kwh` und gegebenenfalls `reason`. Nach Auftragsende liefert
 `completed_at` dessen Zeitpunkt und `completion_evaluated_at` den Zeitpunkt
 der Bewertung (zunächst `None`, falls Messwerte fehlen). `data_gap_reason`
-erhält den Unterbrechungsgrund neben dem Ergebnis; eine Wiederaufnahme vor
-Planende entfernt ihn. `ChargePlan.vue` trennt beendete Aufträge von noch
+erhält den Unterbrechungsgrund neben dem Ergebnis. Eine Wiederaufnahme des
+gültigen Auftrags entfernt ihn. `ChargePlan.vue` trennt beendete Aufträge von noch
 geplanten Teilladungen und zeigt die unbekannte Fehlmenge bei ausstehender
 Bewertung sowie Datenlücke und Bewertungszeitpunkt. Die Komponente verwendet diese
 Daten für die deutsch-/englischsprachige Meldung im zeitvariablen Tab. Die
@@ -1776,9 +1788,9 @@ Auch das eigene Netzladeziel erhält während der Kalibrierung einen
 effektiven Wert von 100 %, bei unverändertem Benutzerwert und unveränderter
 Slidergrenze. Die Kalibrierung startet dabei weiterhin keine eigene
 Netzladung; die regulären Startbedingungen bleiben erforderlich.
-Bei `REQ-BRIDGE-CHARGE` ist 100 % ausschließlich die wirksame Obergrenze;
-der berechnete Bedarf bis PV-Start bestimmt weiterhin das Ziel. Die
-Tarifpreisfenster bleiben verbindlich, auch während Kalibrierungsfälligkeit.
+Bei `REQ-BRIDGE-CHARGE` dient 100 % als wirksame Obergrenze. Der berechnete
+Bedarf bis PV-Start und die Mindestlademenge bestimmen weiterhin das Ziel.
+Die Tarifpreisfenster bleiben auch während Kalibrierungsfälligkeit verbindlich.
 Reihenfolge/Priorität in `_async_enforce_grid_charge`:
 
 1. **SOC ≥ "Max. SOC"** (`soc_reached`): Leistungsvorgabe wird auf 0 %

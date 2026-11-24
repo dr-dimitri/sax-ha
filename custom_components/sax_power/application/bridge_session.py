@@ -11,6 +11,20 @@ from ..domain.bridge_charge import BridgeChargePlan, ChargeWindow, plan_bridge_c
 from ..domain.discharge_forecast import MAX_OBSERVATION_MINUTES
 
 
+def _usable_battery(data: Mapping[str, Any] | None) -> bool:
+    return (
+        data is not None
+        and all(
+            not isinstance(data.get(key), bool)
+            and isinstance(data.get(key), int | float)
+            and math.isfinite(data[key])
+            for key in ("battery_soc", "battery_soc_min", "battery_capacity")
+        )
+        and data["battery_capacity"] > 0
+        and 0 <= data["battery_soc_min"] <= data["battery_soc"] <= 100
+    )
+
+
 class BridgeChargeSession:
     """Retain the measured demand while charging resets the discharge forecast."""
 
@@ -33,6 +47,32 @@ class BridgeChargeSession:
         self._pv_start = None
         self.status = status
         self.attributes = {"reason": reason} if reason else {}
+
+    def target_soc_at(self, now: datetime) -> float | None:
+        if self.plan is None or self.plan.end is None:
+            return None
+        if self.started and now >= self.plan.end:
+            return self.plan.minimum_target_soc
+        return self.plan.target_soc
+
+    def deadline_at(
+        self, now: datetime, data: Mapping[str, Any] | None
+    ) -> datetime | None:
+        """REQ-BRIDGE-CHARGE: Extend only to deliver the measured minimum."""
+        plan = self.plan
+        if plan is None or plan.end is None:
+            return None
+        if (
+            self.started
+            and now >= plan.end
+            and plan.latest_end is not None
+            and plan.minimum_target_soc is not None
+            and data is not None
+            and _usable_battery(data)
+            and data["battery_soc"] < plan.minimum_target_soc
+        ):
+            return plan.latest_end
+        return plan.end
 
     def sync_configuration(self, configuration: object) -> None:
         """Invalidate changed permissions even while planning inputs are missing."""
@@ -63,29 +103,33 @@ class BridgeChargeSession:
         else:
             self.reset("waiting_for_data", reason)
 
-    def _finish_if_due(self, now: datetime, data: Mapping[str, Any] | None) -> None:
+    def finish_at_soc_limit(
+        self, now: datetime, data: Mapping[str, Any] | None
+    ) -> None:
+        """Honor the device policy even when Basic and SunSpec SOC differ."""
+        self._finish_if_due(now, data, soc_limit_reached=True)
+
+    def _finish_if_due(
+        self,
+        now: datetime,
+        data: Mapping[str, Any] | None,
+        *,
+        soc_limit_reached: bool = False,
+    ) -> None:
         """REQ-BRIDGE-CHARGE: Missing measurements defer only the energy verdict."""
-        if self.plan is None or self.plan.end is None:
+        deadline = self.deadline_at(now, data)
+        if deadline is None:
             return
-        usable = data is not None and all(
-            not isinstance(data.get(key), bool)
-            and isinstance(data.get(key), int | float)
-            and math.isfinite(data[key])
-            for key in ("battery_soc", "battery_soc_min", "battery_capacity")
-        )
-        if usable:
-            assert data is not None
-            usable = (
-                data["battery_capacity"] > 0
-                and 0 <= data["battery_soc_min"] <= data["battery_soc"] <= 100
-            )
+        usable = _usable_battery(data)
+        target_soc = self.target_soc_at(now)
         if self.started and (
-            now >= self.plan.end
+            soc_limit_reached
+            or now >= deadline
             or (
                 usable
                 and data is not None
-                and self.plan.target_soc is not None
-                and data["battery_soc"] >= self.plan.target_soc
+                and target_soc is not None
+                and data["battery_soc"] >= target_soc
             )
         ):
             self.started = False
@@ -136,12 +180,10 @@ class BridgeChargeSession:
             self._fingerprint = fingerprint
         self._finish_if_due(now, data)
         if self.started and self.plan is not None:
-            assert self.plan.end is not None and self.plan.target_soc is not None
-            if now < self.plan.end and data["battery_soc"] < self.plan.target_soc:
-                self.status = "charging"
-                self.attributes["reason"] = self.plan.reason
-                self.attributes.pop("data_gap_reason", None)
-                return True
+            self.status = "charging"
+            self.attributes["reason"] = self.plan.reason
+            self.attributes.pop("data_gap_reason", None)
+            return True
         if self.completed_at is not None:
             # A short charge may leave the pre-charge rolling average intact.
             # A new plan needs at least a minute of subsequent observations.

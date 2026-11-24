@@ -175,7 +175,7 @@ laut Hersteller nur mit dem Smart Meter **ADW200** vollständig verfügbar.
 Andere Modelle können hier dauerhaft 0 W melden.
 
 Die Entladeprognose verwendet die durchschnittliche Entladeleistung der letzten
-maximal 60 Minuten, die Batteriekapazität und den verbleibenden SOC oberhalb der
+maximal 15 Minuten, die Batteriekapazität und den verbleibenden SOC oberhalb der
 Geräte-Untergrenze. Nach mindestens einer Minute Messverlauf ab Entladebeginn
 erscheint ein Zeitpunkt. Leerlauf und Ladeimpulse unter einer Minute fließen mit
 0 W Entladeleistung ein. Sobald der Speicher mindestens eine Minute durchgehend
@@ -206,8 +206,8 @@ Volladung wird das Ladeziel vorübergehend auf 100 % gesetzt. Die Funktion
 wartet auf die nächste reguläre Lademöglichkeit und startet dafür keine
 zusätzliche Netzladung. Deine eingestellten Grenzen bleiben erhalten.
 Bei verbrauchsbasierter Ladeplanung steigen dafür nur die wirksamen SOC-Grenzen
-auf 100 %. Bedarf, Tarifpreisfenster und Überbrückung bis zum PV-Start bestimmen
-weiterhin den Auftrag; eine zusätzliche Vollladung aus dem Netz wird nicht geplant.
+auf 100 %. Überbrückungsbedarf, Mindestlademenge und Tarifpreisfenster bestimmen
+weiterhin den Auftrag bis zum PV-Start.
 
 Die Diagnose-Entitäten **Zellkalibrierung aktiv** und **Nächste
 Zellkalibrierung** zeigen Status und Datum. Eine Volladung am 12. September
@@ -248,9 +248,9 @@ günstigen Tarifzeiten, etwa einem Nachttarif. Die Einrichtung hat drei Schritte
    deiner abweichenden Preiszeiten. Speichere den Tarif.
 2. **Netzladung:** Öffne **Bearbeiten** und wähle **Festes Netzladeziel**, wenn der Speicher
    in den günstigsten Zeiten bis zu deinem eingestellten Prozentwert laden
-   soll. **Nur Bedarf bis Solarstrom** plant stattdessen die noch fehlende
-   Energie bis zum erwarteten Solarstrom; dafür ist eine passende PV-Prognose
-   erforderlich. Das Ladeziel ist dann eine Obergrenze.
+   soll. **Nur Bedarf bis Solarstrom** prüft anhand einer PV-Prognose, ob bis
+   zum erwarteten Solarstrom Energie fehlt. Bei Bedarf plant die Integration
+   mindestens 1 kWh zusätzliche Batterieenergie bis zur eingestellten Obergrenze.
 3. **Automatik einschalten:** Schließe die Bearbeitung und aktiviere **Automatische Netzladung**, sobald
    die Einstellungen passen. Einschalten erlaubt die Ladung unter den
    angezeigten Bedingungen; es bedeutet nicht, dass der Speicher sofort lädt.
@@ -361,21 +361,22 @@ Solange diese Ladeplanung eingeschaltet ist, bleibt ihre PV-Start-Quelle
 erforderlich. Du kannst sie unter **Preise & Zeiten → Bearbeiten → Zusätzlich: Solarprognose für die Ladeplanung** ersetzen;
 zum Entfernen schaltest du zuerst die verbrauchsbasierte Ladeplanung aus.
 Ein abgelehnter Speicherversuch erhält deine Eingaben und die bisherigen Werte.
-**Netzladung aktiv** muss ebenfalls eingeschaltet sein; die
-ausgewählten Monate gelten weiterhin. Die Planung berechnet aus dem Verbrauch
-der letzten 1 bis 60 Minuten, ob der Speicher bis zum erwarteten PV-Start reicht.
-Nur den fehlenden Bedarf lädt sie aus dem Netz nach. **Netzladen Max. SOC** und
-die globale Grenze **Max. SOC** begrenzen das Ziel; die Startschwelle
-**Netzladung Min. SOC** wird in dieser Betriebsart durch den berechneten Bedarf
-ersetzt.
+**Netzladung aktiv** muss ebenfalls eingeschaltet sein. Die ausgewählten
+Monate gelten weiterhin. Die Planung berechnet aus dem Verbrauch der letzten
+1 bis 15 Minuten, ob der Speicher bis zum erwarteten PV-Start reicht. Fehlt
+Energie, plant sie mindestens **1 kWh zusätzliche Energie im Speicher** ein.
+Lassen **Netzladen Max. SOC** oder die globale Grenze **Max. SOC** weniger Platz,
+begrenzt der verfügbare Platz die Lademenge. Die Bedarfsberechnung ersetzt die
+Startschwelle **Netzladung Min. SOC**.
 
 Die erlaubten Ladezeiten stammen ausschließlich aus den **Tarifpreisfenstern**
 deines gespeicherten tageszeitabhängigen Tarifs. Verwendet werden dessen
 günstigste Abschnitte, einschließlich Zeiten mit Standardpreis, wenn dieser am
 günstigsten ist. Gibt es vor dem PV-Start keinen solchen Abschnitt, wird keine
-teurere Ersatzzeit gewählt. Die gemeinsame Tarifquelle gilt auch für feste
-SOC-Ladung; bei Verbrauchsplanung wird zusätzlich die nicht verwendete
-Min.-SOC-Startschwelle im Dashboard ausgeblendet.
+teurere Ersatzzeit gewählt. Ein Ladeabschnitt muss lang genug für die
+Mindestlademenge sein, gegebenenfalls begrenzt durch den verfügbaren Platz bis
+zur SOC-Obergrenze. Die gemeinsame Tarifquelle gilt auch für feste SOC-Ladung.
+Bei Verbrauchsplanung blendet das Dashboard die Min.-SOC-Startschwelle aus.
 
 Wähle in den Integrationsoptionen als **PV-Prognose-Sensor** einen Sensor deiner
 Integration `pv_forecast`. Die Ladeplanung liest darüber die 15-Minuten-Prognose
@@ -401,17 +402,20 @@ bis zur SOC-Obergrenze begrenzen den Vorlauf. Die geplante Lademenge bleibt glei
 
 Geplant wird jeweils eine zusammenhängende Ladung. Während sie läuft, bleibt
 ihre Verbrauchsbasis erhalten, auch wenn der Entladeprognose-Sensor durch die
-Ladung zurückgesetzt wird. Die Ladung endet spätestens zum geplanten Ende oder
-beim Erreichen des berechneten SOC-Ziels. Danach darf der Speicher wieder normal
-entladen; die Entladesperre bis zum Ende des bisherigen Netzladezeitfensters
-gilt in dieser Betriebsart nicht. Neue Planung benötigt mindestens eine Minute
-nach dem Ladeende und wieder gültige Verbrauchsmessungen. Ein Neustart verwirft
-den Auftrag und benötigt neue Messungen.
+Ladung zurückgesetzt wird. Bei planmäßigem Verlauf endet die Ladung beim
+berechneten SOC-Ziel oder zur geplanten Zeit. Liegt der gemessene Zuwachs zum
+geplanten Ende unter der Mindestlademenge, kann die Ladung bis zu dieser Menge
+weiterlaufen. Das ursprüngliche Tarifende oder der geplante PV-Start beenden
+die Ladung spätestens. Fehlende Messdaten oder Prognosen können sie vorher
+unterbrechen. Nach Abschluss darf der Speicher wieder normal entladen. Eine
+neue Planung benötigt mindestens eine Minute nach dem Ladeende und wieder
+gültige Verbrauchsmessungen. Ein Neustart verwirft den Auftrag und benötigt
+neue Messungen.
 
 PV-Überschuss, manuelle Ladung und die bestehenden Ladegrenzen werden weiterhin
 berücksichtigt. Bei fälliger Zellkalibrierung steigen die wirksame globale
-SOC-Grenze und die Netzlade-SOC-Grenze auf 100 %. Die Planung lädt weiterhin nur
-den Bedarf bis zum PV-Start innerhalb der Tarifpreisfenster. Das verborgene
+SOC-Grenze und die Netzlade-SOC-Grenze auf 100 %. Überbrückungsbedarf und
+Mindestlademenge gelten weiterhin innerhalb der Tarifpreisfenster. Das verborgene
 Netzladezeitfenster und Min. SOC werden auch dann nicht verwendet; eine
 zusätzliche Vollladung aus dem Netz wird nicht gestartet. PV oder ein entsprechend
 hoher Überbrückungsbedarf können den Speicher bis 100 % bringen.

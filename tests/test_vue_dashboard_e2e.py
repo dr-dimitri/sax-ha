@@ -16,6 +16,7 @@ from pymodbus.client import AsyncModbusTcpClient
 
 from custom_components.sax_power.const import (
     CHARGING_SETTING_KEYS,
+    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
     DATA_COORDINATOR,
@@ -102,6 +103,8 @@ async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically
             entity_ids[key] = renamed
         await hass.async_block_till_done()
         assert device_id
+        minimum_entity_id = entity_ids[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH]
+        assert float(hass.states.get(minimum_entity_id).state) == 1
         hass_read_only_user.mock_policy(
             {
                 "entities": {
@@ -116,7 +119,9 @@ async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically
         applied = []
 
         async def record_apply(data: dict[str, Any]) -> None:
-            applied.append(coordinator.control_config())
+            applied.append(
+                (coordinator.control_config(), coordinator.bridge_charge_min_energy_kwh)
+            )
 
         with (
             patch.object(
@@ -136,6 +141,7 @@ async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically
                             "timed_charge_min_soc": 10,
                             "timed_charge_max_soc": 15,
                             "max_soc": 20,
+                            CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: 0.5,
                         },
                         {
                             "timed_charge_min_soc": 80,
@@ -144,6 +150,7 @@ async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically
                             "price_charge_max_price": 12.3,
                             "price_charge_neutral_price": 20.6,
                             "price_charge_hours": 4,
+                            CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: 1.6,
                         },
                     ],
                     1,
@@ -160,6 +167,10 @@ async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically
                     await asyncio.wait_for(_result(sender, request_id), 0.5)
                     for key, value in values.items():
                         assert float(hass.states.get(entity_ids[key]).state) == value
+                    assert (
+                        entry.options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH]
+                        == values[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH]
+                    )
                     worker = worker or coordinator._month_control_task
                     assert coordinator._month_control_task is worker
                     assert not applied
@@ -177,6 +188,11 @@ async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically
                         "invalid_charging_setting",
                     ),
                     (5, {}, "charging_settings_required"),
+                    (
+                        6,
+                        {"max_soc": 95, CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: 1.65},
+                        "invalid_charging_setting",
+                    ),
                 ):
                     await sender.send_json(
                         {
@@ -192,6 +208,7 @@ async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically
                     assert not response["success"]
                     assert response["error"]["translation_key"] == code
                     assert coordinator.control_config() == before
+                    assert entry.options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] == 1.6
                     assert coordinator._month_control_task is worker
                     write.assert_not_called()
                 hass_read_only_user.mock_policy(
@@ -205,26 +222,27 @@ async def test_charging_settings_batch_ws_confirms_latest_valid_draft_atomically
                 )
                 await sender.send_json(
                     {
-                        "id": 6,
+                        "id": 7,
                         "type": "call_service",
                         "domain": DOMAIN,
                         "service": "set_charging_settings",
                         "service_data": {
                             "device_id": device_id,
                             "max_soc": 95,
-                            "price_charge_hours": 5,
+                            CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: 2.0,
                         },
                     }
                 )
                 response = await asyncio.wait_for(sender.receive_json(), 0.5)
-                assert response["id"] == 6
+                assert response["id"] == 7
                 assert not response["success"]
                 assert response["error"]["code"] == "home_assistant_error"
                 assert response["error"]["message"] == "Unauthorized"
                 assert coordinator.control_config() == before
+                assert entry.options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] == 1.6
                 write.assert_not_called()
             await worker
-            assert applied == [before]
+            assert applied == [(before, 1.6)]
         await sender.close()
     finally:
         await hass.config_entries.async_unload(entry.entry_id)

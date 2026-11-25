@@ -10,7 +10,7 @@ from enum import StrEnum
 
 _ENERGY_EPSILON = 1e-6
 _START_BUFFER_HOURS = 10 / 60
-MIN_BRIDGE_CHARGE_ENERGY_WH = 1000
+DEFAULT_MIN_BRIDGE_CHARGE_ENERGY_WH = 1000
 
 
 class BridgeChargeStatus(StrEnum):
@@ -107,18 +107,19 @@ def plan_bridge_charge(
     max_soc: float,
     charge_power_w: float,
     windows: Sequence[ChargeWindow],
+    minimum_charge_energy_wh: float = DEFAULT_MIN_BRIDGE_CHARGE_ENERGY_WH,
 ) -> BridgeChargePlan:
-    """Choose the cheapest sufficient charge and buffer its latest feasible start.
+    """Choose a charge and buffer its latest feasible start.
 
     The caller supplies the measured, time-weighted average and the allowed
     tariff intervals. While charging, the grid supplies house consumption and
     the battery gains ``charge_power_w``. Otherwise it discharges at the
     measured average down to ``min_soc``. No discharge lock is assumed.
 
-    A charge adds at least 1 kWh unless the SOC ceiling is reached first.
-    If no single interval suffices, maximize the covered energy first, then
-    prefer the cheapest and latest partial charge. No charge may exceed the
-    SOC ceiling or extend beyond its interval or PV start.
+    A charge adds at least ``minimum_charge_energy_wh`` unless the SOC ceiling
+    is reached first. Maximize the covered energy, favor the full minimum,
+    then prefer the cheapest and latest charge. No charge may exceed the SOC
+    ceiling or extend beyond its interval or PV start.
     """
     unavailable = BridgeChargeStatus.UNAVAILABLE
     if not _aware(now) or not _aware(pv_start):
@@ -127,6 +128,8 @@ def plan_bridge_charge(
     pv_start = pv_start.astimezone(UTC)
     if pv_start <= now:
         return BridgeChargePlan(unavailable, reason="pv_start_not_future")
+    if not _finite(minimum_charge_energy_wh) or minimum_charge_energy_wh <= 0:
+        return BridgeChargePlan(unavailable, reason="invalid_minimum_charge_energy")
     values = (
         average_discharge_w,
         capacity_wh,
@@ -182,7 +185,7 @@ def plan_bridge_charge(
         )
 
     duration_needed = required / (power + discharge)
-    minimum_duration = MIN_BRIDGE_CHARGE_ENERGY_WH / power
+    minimum_duration = minimum_charge_energy_wh / power
     discharge_duration = available / discharge
     candidates: list[BridgeChargePlan] = []
     for window in _merged_windows(windows):
@@ -198,7 +201,7 @@ def plan_bridge_charge(
         )
         time_limit = end - start
         if (
-            power * time_limit < MIN_BRIDGE_CHARGE_ENERGY_WH - _ENERGY_EPSILON
+            power * time_limit < minimum_charge_energy_wh - _ENERGY_EPSILON
             and power * (capacity_limit - time_limit) > _ENERGY_EPSILON
         ):
             continue
@@ -260,7 +263,7 @@ def plan_bridge_charge(
                 minimum_target_soc=min(
                     target_soc,
                     min_soc
-                    + (before_charge + MIN_BRIDGE_CHARGE_ENERGY_WH) / capacity_wh * 100,
+                    + (before_charge + minimum_charge_energy_wh) / capacity_wh * 100,
                 ),
             )
         )
@@ -277,7 +280,7 @@ def plan_bridge_charge(
         candidates,
         key=lambda plan: (
             plan.missing_energy_wh,
-            plan.charge_energy_wh < MIN_BRIDGE_CHARGE_ENERGY_WH - _ENERGY_EPSILON,
+            plan.charge_energy_wh < minimum_charge_energy_wh - _ENERGY_EPSILON,
             float("inf") if plan.price is None else plan.price,
             -plan.start.timestamp(),
         ),

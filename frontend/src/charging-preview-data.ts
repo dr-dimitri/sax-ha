@@ -28,6 +28,7 @@ export function chargingSample(language = "de"): {
       if (
         key !== "max_soc" &&
         key !== "charging_pv_forecast" &&
+        key !== "bridge_charge_min_energy_kwh" &&
         !key.startsWith("timed_charge_") &&
         !key.startsWith("grid_serving_") &&
         !key.startsWith("price_charge_")
@@ -57,6 +58,15 @@ export function chargingSample(language = "de"): {
         attributes = { min: 0, max: 100, step: 1, unit_of_measurement: "%" };
         if (key === "timed_charge_max_soc") attributes.max = 90;
         if (key === "timed_charge_min_soc") state = "20";
+        if (key === "bridge_charge_min_energy_kwh") {
+          state = "1";
+          attributes = {
+            min: 0.5,
+            max: 100,
+            step: 0.1,
+            unit_of_measurement: "kWh",
+          };
+        }
         if (key.includes("price") && !key.endsWith("hours")) {
           state = key.endsWith("neutral_price") ? "30" : "-5";
           attributes = {

@@ -405,6 +405,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
 
   it("sends one existing bridge switch service, blocks repeats and waits for confirmed state", async () => {
     const fixture = await mount();
+    expect(control(fixture.root, "Mindestlademenge (kWh)")).toBeUndefined();
     let resolve!: () => void;
     fixture.callService.mockImplementationOnce(
       () =>
@@ -456,6 +457,10 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       ].map((label) => label.textContent?.trim()),
     ).toEqual(["Maximales Netzladeziel", "Max SOC"]);
     expect(control(fixture.root, "Maximales Netzladeziel (%)")).toBeTruthy();
+    expect(control(fixture.root, "Mindestlademenge (kWh)")).toBeTruthy();
+    expect(
+      fixture.root.querySelector(".tou-charging-summary")?.textContent,
+    ).toContain("1 kWh");
     expect(fixture.root.querySelector(".tou-charging-threshold")).toBeNull();
     expect(control(fixture.root, "Ladestart unter (%)")).toBeUndefined();
     method(fixture.root, "bridge").click();
@@ -705,6 +710,12 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: understandable time-of-use charging", () =
       ).querySelector<HTMLInputElement>("input")?.disabled,
     ).toBe(true);
     expect(control(fixture.root, "Max SOC (%)").closest("details")).toBeNull();
+    expect(
+      control(
+        fixture.root,
+        "Minimum charging energy (kWh)",
+      ).querySelector<HTMLInputElement>("input")?.disabled,
+    ).toBe(true);
     expect(
       fixture.root.querySelector(".tou-charging-editor")?.textContent,
     ).not.toContain("Solar forecast missing");

@@ -401,6 +401,12 @@ GRID_CHARGE_WRITE_INTERVAL = 30  # Sekunden
 # SaxPowerCoordinator._sun_ic_write_interval.
 SUN_IC_MIN_WRITE_INTERVAL = 5  # Sekunden, Untergrenze gegen zu enges Polling
 
+CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH = "bridge_charge_min_energy_kwh"
+DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH = 1.0
+MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH = 0.5
+MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH = 100.0
+BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH = 0.1
+
 SERVICE_START_GRID_CHARGE = "start_grid_charge"
 SERVICE_STOP_GRID_CHARGE = "stop_grid_charge"
 SERVICE_SET_TIMED_CHARGE_WINDOW = "set_timed_charge_window"
@@ -410,6 +416,7 @@ CHARGING_SETTING_KEYS = (
     "max_soc",
     "timed_charge_min_soc",
     "timed_charge_max_soc",
+    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     "price_charge_max_price",
     "price_charge_hours",
     "price_charge_neutral_price",

@@ -66,6 +66,7 @@ const text = computed(() =>
         target: "Netzladeziel",
         fixedTarget: "Netzladeziel (%)",
         bridgeTarget: "Maximales Netzladeziel (%)",
+        minimumEnergy: "Mindestlademenge",
         pvRequired: "PV-Prognose fehlt · unter „Preise & Zeiten“ ergänzen.",
         months: "Aktive Monate",
         allYear: "Ganzjährig",
@@ -93,6 +94,7 @@ const text = computed(() =>
         target: "Grid charge target",
         fixedTarget: "Grid charge target (%)",
         bridgeTarget: "Maximum grid charge target (%)",
+        minimumEnergy: "Minimum charging energy",
         pvRequired: "Solar forecast missing · add it under Prices & times.",
         months: "Active months",
         allYear: "All year",
@@ -141,6 +143,9 @@ const threshold = computed(() =>
   dashboard?.entity("number", "timed_charge_min_soc"),
 );
 const globalLimit = computed(() => dashboard?.entity("number", "max_soc"));
+const minimumEnergy = computed(() =>
+  dashboard?.entity("number", "bridge_charge_min_energy_kwh"),
+);
 const numberFields = computed(() => [
   ...(editorMethod.value === "fixed"
     ? [{ key: "timed_charge_min_soc", label: text.value.threshold }]
@@ -157,6 +162,14 @@ const numberFields = computed(() => [
       ]
     : []),
   { key: "max_soc", label: text.value.global },
+  ...(editorMethod.value === "bridge"
+    ? [
+        {
+          key: "bridge_charge_min_energy_kwh",
+          label: `${text.value.minimumEnergy} (kWh)`,
+        },
+      ]
+    : []),
 ]);
 const targetLabel = computed(() =>
   selected.value === "bridge"
@@ -237,6 +250,18 @@ async function choose(method: Method): Promise<void> {
           }}</strong>
         </div>
       </div>
+      <dl v-if="selected === 'bridge'" class="electricity-summary-rows">
+        <div>
+          <dt>{{ text.minimumEnergy }}</dt>
+          <dd>
+            {{
+              minimumEnergy?.available
+                ? minimumEnergy.displayValue
+                : text.valueUnavailable
+            }}
+          </dd>
+        </div>
+      </dl>
       <dl class="electricity-summary-rows tou-charging-month-summary">
         <div>
           <dt>{{ text.months }}</dt>

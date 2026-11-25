@@ -383,7 +383,10 @@ const months = Array.from(
   (_, index) => `timed_charge_month_${index + 1}`,
 );
 const chargingFeedback = computed(() => {
-  const fields: ["number" | "switch", string][] =
+  const bridgeSelected =
+    !fixedTimeEnabled.value &&
+    dashboard?.entity("switch", "bridge_charge_enabled")?.state?.state === "on";
+  const fields: (readonly ["number" | "switch", string])[] =
     active.value === "dynamic"
       ? [
           ["number", "max_soc"],
@@ -395,6 +398,9 @@ const chargingFeedback = computed(() => {
           ["number", "max_soc"],
           ["number", "timed_charge_max_soc"],
           ["number", "timed_charge_min_soc"],
+          ...(bridgeSelected
+            ? [["number", "bridge_charge_min_energy_kwh"] as const]
+            : []),
           ["switch", "bridge_charge_enabled"],
           ...months.map((key): ["switch", string] => ["switch", key]),
         ];

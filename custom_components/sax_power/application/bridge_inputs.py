@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Set
+import math
+from collections.abc import Mapping, Set
 from datetime import UTC, datetime, timedelta
 from datetime import time as dt_time
 
+from ..const import (
+    BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
+    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+)
 from ..domain.bridge_charge import ChargeWindow
 from ..domain.tariff import (
     TariffConfig,
@@ -15,6 +23,36 @@ from ..domain.tariff import (
 )
 
 MAX_BRIDGE_HORIZON = timedelta(hours=26)
+
+
+def require_bridge_charge_min_energy_kwh(value: object) -> float:
+    """Validate and normalize the shared tariff-bridge setting."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH
+        <= value
+        <= MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH
+        or not math.isclose(
+            value / BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
+            round(value / BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH),
+            rel_tol=0,
+            abs_tol=1e-9,
+        )
+    ):
+        raise ValueError("Ungültige Mindestlademenge für die Netzladung")
+    return round(float(value), 1)
+
+
+def bridge_charge_min_energy_kwh_from_options(options: Mapping[str, object]) -> float:
+    """Keep the established minimum when loading older or invalid options."""
+    value = options.get(
+        CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH, DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH
+    )
+    try:
+        return require_bridge_charge_min_energy_kwh(value)
+    except ValueError:
+        return DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH
 
 
 def _aware(value: object) -> bool:

@@ -14,9 +14,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
+from custom_components.sax_power import async_update_options
 from custom_components.sax_power.application.timed_discharge import TimedDischargeState
 from custom_components.sax_power.const import (
     CONF_BRIDGE_CHARGE_ENABLED,
+    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    DATA_COORDINATOR,
+    DOMAIN,
     MIN_SETPOINT_POWER,
     REG_SUN_IC_CONTROL_MODE,
     REG_SUN_IC_POWER_SETPOINT_PCT,
@@ -25,6 +29,7 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.domain.registers import to_unsigned16
+from tests.ha import MockConfigEntry
 
 NOW = datetime(2026, 9, 13, tzinfo=UTC)
 _CLOCK = "custom_components.sax_power.coordinator.monotonic"
@@ -742,6 +747,92 @@ async def test_new_deadline_replaces_sleeping_legacy_writer(
     await _evaluate(coordinator, NOW, _data(NOW))
     assert sleeping.cancelled()
     assert coordinator._bridge_charge_deadline == NOW + timedelta(minutes=30)
+
+
+@pytest.mark.parametrize(
+    "delayed_register", [REG_SUN_IC_CONTROL_MODE, REG_SUN_IC_POWER_SETPOINT_PCT]
+)
+@pytest.mark.parametrize("via_options", [False, True])
+async def test_minimum_change_revokes_write_during_either_ack(
+    coordinator: SaxPowerCoordinator, delayed_register: int, via_options: bool
+) -> None:
+    """REQ-BRIDGE-CHARGE: A reply cannot restore an older minimum."""
+    await _evaluate(coordinator, NOW, _data(NOW))
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    dashboard_sync_started = asyncio.Event()
+    release_dashboard = asyncio.Event()
+    entry = MockConfigEntry(
+        domain=DOMAIN, entry_id=coordinator.entry_id, options=dict(coordinator.options)
+    )
+    entry.add_to_hass(coordinator.hass)
+    entry.add_update_listener(async_update_options)
+    coordinator.hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        DATA_COORDINATOR: coordinator
+    }
+
+    async def sync_dashboard(*_args: Any) -> None:
+        dashboard_sync_started.set()
+        await release_dashboard.wait()
+
+    async def write(address: int, value: int) -> None:
+        if address == delayed_register and value != SUN_IC_CONTROL_MODE_SMARTMETER:
+            entered.set()
+            await release.wait()
+
+    coordinator.async_write_extended_register = AsyncMock(side_effect=write)
+    with (
+        patch("custom_components.sax_power.coordinator.dt_util.now", return_value=NOW),
+        patch(
+            "custom_components.sax_power.coordinator.dt_util.utcnow", return_value=NOW
+        ),
+        patch(_CLOCK, return_value=100),
+        patch("custom_components.sax_power.async_sync_vue_dashboard", sync_dashboard),
+    ):
+        async with coordinator._charge_control_lock:
+            command = asyncio.create_task(
+                coordinator._async_write_sun_charge_setpoint(
+                    MIN_SETPOINT_POWER, data=coordinator.data
+                )
+            )
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+                if via_options:
+                    coordinator.hass.config_entries.async_update_entry(
+                        entry,
+                        options={
+                            **entry.options,
+                            CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: 1.4,
+                        },
+                    )
+                    await asyncio.wait_for(dashboard_sync_started.wait(), 1)
+                else:
+                    await asyncio.wait_for(
+                        coordinator.async_set_bridge_charge_min_energy_kwh(1.4), 1
+                    )
+                assert coordinator.bridge_charge_min_energy_kwh == 1.4
+                assert coordinator._bridge_session.plan is None
+                revision = coordinator._tariff_source_revision
+                with pytest.raises(HomeAssistantError):
+                    coordinator._check_timed_charge_write(MIN_SETPOINT_POWER)
+            finally:
+                release.set()
+                release_dashboard.set()
+            with pytest.raises(HomeAssistantError):
+                await command
+            worker = coordinator._month_control_task
+            assert worker is not None
+        await worker
+
+    calls = [
+        call.args for call in coordinator.async_write_extended_register.await_args_list
+    ]
+    assert calls[0] == (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT)
+    assert calls[-1] == (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SMARTMETER)
+    assert len(calls) == (2 if delayed_register == REG_SUN_IC_CONTROL_MODE else 3)
+    assert coordinator._tariff_control_revision == revision
+    assert coordinator._bridge_session.plan is not None
+    assert coordinator._bridge_session.plan.charge_energy_wh == pytest.approx(1400)
 
 
 async def test_deadline_expiring_during_mode_ack_rolls_back_without_setpoint(

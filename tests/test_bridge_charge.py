@@ -74,6 +74,35 @@ def test_positive_demand_charges_at_least_one_kwh_when_soc_allows(
     assert plan.missing_energy_wh == 0
 
 
+@pytest.mark.parametrize(
+    ("minimum_wh", "max_soc", "charge_wh"),
+    [(500, 80, 500), (1500, 80, 1500), (1500, 22, 1200)],
+)
+def test_configured_minimum_is_limited_by_maximum_soc(
+    minimum_wh: int, max_soc: int, charge_wh: int
+) -> None:
+    plan = _plan(
+        pv_start=_at(1), soc=10, max_soc=max_soc, minimum_charge_energy_wh=minimum_wh
+    )
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert plan.start == NOW
+    assert plan.end == _at(charge_wh / 2000)
+    assert plan.charge_energy_wh == charge_wh
+    assert plan.minimum_target_soc == plan.target_soc == 10 + charge_wh / 100
+
+
+def test_lower_minimum_makes_short_tariff_window_usable() -> None:
+    plan = _plan(
+        soc=10,
+        pv_start=_at(1),
+        windows=[_window(0, 0.25)],
+        minimum_charge_energy_wh=500,
+    )
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert plan.start == NOW and plan.end == _at(0.25)
+    assert plan.charge_energy_wh == 500
+
+
 @pytest.mark.parametrize("time_limit", ["tariff", "pv"])
 def test_no_charge_if_only_time_prevents_the_minimum(time_limit: str) -> None:
     plan = _plan(
@@ -96,17 +125,25 @@ def test_charge_below_minimum_is_allowed_when_time_and_soc_limits_coincide() -> 
     assert plan.end == plan.latest_end == _at(0.25)
 
 
-def test_full_minimum_preferred_over_soc_limited_charge_with_same_coverage() -> None:
+@pytest.mark.parametrize("minimum_wh", [500, 1000, 1500])
+def test_full_minimum_preferred_over_soc_limited_charge_with_same_coverage(
+    minimum_wh: int,
+) -> None:
+    scale = minimum_wh / 1000
     plan = _plan(
         soc=16,
         max_soc=20,
         pv_start=_at(2),
         windows=[_window(0, 0.25, 0.1), _window(1.1, 2, 0.2)],
+        capacity_wh=10000 * scale,
+        average_discharge_w=500 * scale,
+        charge_power_w=2000 * scale,
+        minimum_charge_energy_wh=minimum_wh,
     )
     assert plan.status == BridgeChargeStatus.PLANNED
     assert plan.start == _at(1.2)
     assert plan.end == _at(1.7)
-    assert plan.charge_energy_wh == 1000
+    assert plan.charge_energy_wh == minimum_wh
 
 
 def test_weighted_average_is_used_without_reaveraging_observations() -> None:
@@ -356,6 +393,16 @@ def test_past_or_current_pv_start_is_unavailable(pv_start: datetime) -> None:
 def test_non_numeric_inputs_are_unavailable(key: str, invalid: Any) -> None:
     plan = _plan(**{key: invalid})
     assert plan.status == BridgeChargeStatus.UNAVAILABLE
+    assert plan.start is None and plan.required_energy_wh is None
+
+
+@pytest.mark.parametrize(
+    "invalid", [None, True, "500", 0, -1, float("nan"), float("inf"), 10**1000]
+)
+def test_invalid_minimum_charge_energy_is_unavailable(invalid: Any) -> None:
+    plan = _plan(minimum_charge_energy_wh=invalid)
+    assert plan.status == BridgeChargeStatus.UNAVAILABLE
+    assert plan.reason == "invalid_minimum_charge_energy"
     assert plan.start is None and plan.required_energy_wh is None
 
 

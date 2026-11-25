@@ -383,6 +383,9 @@
       "grid_serving_forecast_threshold": {
         "name": "Mindest PV-Prognose"
       },
+      "bridge_charge_min_energy_kwh": {
+        "name": "Mindestladung bis Solarstrom"
+      },
       "price_charge_max_price": {
         "name": "Netzbezug und Laden bis"
       },
@@ -760,6 +763,10 @@
         "timed_charge_max_soc": {
           "name": "Netzladeziel"
         },
+        "bridge_charge_min_energy_kwh": {
+          "name": "Mindestladung bis Solarstrom",
+          "description": "Mindestmenge für „Nur Bedarf bis Solarstrom“."
+        },
         "price_charge_max_price": {
           "name": "Netzbezug und Laden bis"
         },
@@ -787,6 +794,7 @@
           "economics_investment_cost_eur": "Investitionskosten (EUR)",
           "economics_prior_result_eur": "Bereits erwirtschafteter Ertrag (EUR)",
           "bridge_charge_enabled": "Verbrauchsbasierte Ladeplanung aktivieren",
+          "bridge_charge_min_energy_kwh": "Mindestladung bis Solarstrom",
           "grid_serving_pv_forecast_sensor": "PV-Prognose-Sensor für die Ladepause (heute verbleibend)"
         },
         "data_description": {
@@ -799,6 +807,7 @@
           "economics_investment_cost_eur": "Einmalige Anschaffungskosten der Speicheranlage in Euro - Speicher, Installation und Zubehör, so wie sie auf der Rechnung stehen. Daraus berechnet die Integration ROI, Amortisationsfortschritt und Restbetrag bis zur Amortisation; verrechnet wird gegen das laufende, signierte Nettoergebnis. Optional und unabhängig vom Tarifmodell: ein Tarifwechsel löscht den Wert nicht. Leer lassen deaktiviert alle Amortisationssensoren, die übrige Wirtschaftlichkeitsbilanz läuft unverändert weiter.",
           "economics_prior_result_eur": "Optional. Betrag, den die Anlage vor der Einrichtung dieser Integration bereits erwirtschaftet hat - für Speicher, die schon länger laufen. Ohne diesen Wert stünde der Amortisationsfortschritt bei 0 %, obwohl ein Teil der Investition längst zurückverdient ist. Der Betrag wirkt ausschließlich auf ROI, Amortisationsfortschritt und Restbetrag; die Netto-Ersparnis zeigt weiterhin nur, was die Integration selbst gemessen hat, damit die Verlaufsgrafik keinen künstlichen Tagesertrag ausweist. Leer lassen oder 0 bedeutet: kein Vorlauf.",
           "bridge_charge_enabled": "Verwendet ausschließlich die günstigsten gespeicherten Tarifpreisfenster. Als gemeinsame PV-Quelle einen Energiesensor von PV Forecast wählen; dessen Stundenprognose liefert den PV-Start, sobald sie den gemessenen Verbrauch mindestens 30 Minuten deckt. Netzladung und aktive Monate müssen eingeschaltet sein. Der Bedarf ersetzt Min. SOC; Max. SOC bleibt Obergrenze. Nach dem Laden wird die Entladung freigegeben.",
+          "bridge_charge_min_energy_kwh": "Mindestenergie pro bedarfsabhängiger Netzladung. Das Netzladeziel und die erlaubten Tarifzeiten begrenzen die Ladung.",
           "grid_serving_pv_forecast_sensor": "Energiesensor mit dem heute noch erwarteten PV-Ertrag, ohne bereits erzeugte Energie. Erforderlich für eine netzdienliche Ladepause mit Mindest-PV-Prognose über 0 kWh. Ohne Auswahl greift diese Pause nicht; 0 kWh deaktiviert die Prognosebedingung. Diese Quelle nach einem Update ausdrücklich auswählen."
         }
       },

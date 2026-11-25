@@ -35,6 +35,7 @@ from .const import (
     ATTR_START,
     CHARGING_SETTING_KEYS,
     CONF_BRIDGE_CHARGE_ENABLED,
+    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_METER_POSITIVE_IMPORT,
@@ -47,6 +48,7 @@ from .const import (
     CONF_VUE_DASHBOARD_ENABLED,
     CONF_VUE_DASHBOARD_VERSION,
     DATA_COORDINATOR,
+    DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     DEFAULT_PORT,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
@@ -418,6 +420,7 @@ def _control_options(options: Mapping[str, Any]) -> dict[str, Any]:
     """Vergleiche die wirksamen Optionen ohne UI-Flag und ergänzte Formulardefaults."""
     defaults = {
         CONF_BRIDGE_CHARGE_ENABLED: False,
+        CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH,
         CONF_PRICE_UNIT: DEFAULT_PRICE_UNIT,
         CONF_PV_FORECAST_FACTOR: DEFAULT_PV_FORECAST_FACTOR,
         CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value,
@@ -467,24 +470,16 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     entry_data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if entry_data is None:
         return
-    await async_sync_vue_dashboard(hass, entry)
     coordinator: SaxPowerCoordinator = entry_data[DATA_COORDINATOR]
-    if coordinator.options == entry.options:
-        # hass.config_entries.async_update_entry löst diesen Listener auch
-        # aus, wenn ausschließlich entry.DATA geschrieben wurde - etwa beim
-        # Bestätigen eines Dashboard-Versionsstands (repairs.py). Ohne diese
-        # Abkürzung setzte eine reine Datenänderung den diagnostischen Zeitstempel
-        # der letzten Tarifrevision zurück und liefe durch
-        # async_apply_price_plan bis in einen Modbus-Schreibpfad, obwohl
-        # sich an den Options nichts geändert hat.
-        return
-    previous_options = _control_options(coordinator.options)
-    if previous_options == _control_options(entry.options):
-        # REQ-VUE-DASHBOARD: Eine reine UI-Option darf weder die Tarifrevision
-        # noch den Modbus-Sollwert einer laufenden Ladeautomatik verändern.
-        coordinator.options = dict(entry.options)
-        return
-    await coordinator.async_apply_tariff_options(dict(entry.options))
+    if coordinator.options != entry.options:
+        if _control_options(coordinator.options) == _control_options(entry.options):
+            # REQ-VUE-DASHBOARD: Reine UI-Optionen widerrufen keine Ladefreigabe.
+            coordinator.options = dict(entry.options)
+        else:
+            # REQ-BRIDGE-CHARGE: Ein alter Ladebefehl darf während des
+            # Dashboard-Abgleichs keine Freigabe mehr behalten.
+            await coordinator.async_apply_tariff_options(dict(entry.options))
+    await async_sync_vue_dashboard(hass, entry)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

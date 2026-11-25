@@ -1099,12 +1099,13 @@ Der Bedarf ergibt sich aus dem Verbrauch bis PV-Start abzüglich der nutzbaren
 Batterieenergie oberhalb der Geräte-SOC-Untergrenze. Während Netzladung wird
 Hausverbrauch aus dem Netz gedeckt. Die Berechnung berücksichtigt den
 Energiezuwachs im Speicher und die in dieser Zeit vermiedene Entladung.
-Solange ein Bedarf besteht, beträgt der geplante Zuwachs mindestens 1 kWh.
+Bei positivem Bedarf gilt die eingestellte Mindestlademenge als Untergrenze
+für den geplanten Energiezuwachs im Speicher. Die Planung verwendet Wh.
 Der freie Platz bis zum effektiven Netzlade-Max-SOC begrenzt diese Mindestmenge.
 Ist der Tarifabschnitt bis zum PV-Start für die gegebenenfalls begrenzte
 Mindestmenge zu kurz, gibt die Domain ihn nicht zum Laden frei.
 Ein Auftrag ist zusammenhängend. Bei gleicher Bedarfsdeckung hat ein Auftrag
-mit mindestens 1 kWh Vorrang. Danach entscheiden der günstigste Tarifabschnitt
+mit voller Mindestlademenge Vorrang. Danach entscheiden der günstigste Tarifabschnitt
 und bei gleichem Preis der späteste mögliche Start.
 Die Planung zieht den gesamten Ladeblock von dort um bis zu zehn Minuten vor.
 Der Start liegt im Tarifabschnitt und setzt genug freie Kapazität für die
@@ -1172,8 +1173,15 @@ Es gibt keine zusätzliche Startzeit-Entity,
 manuelle PV-Uhrzeit oder Ableitung aus der Tagesenergiesumme. Fehlende oder
 ungültige Prognosedaten geben keine geplante Netzladung frei.
 
-Die Option `bridge_charge_enabled` schaltet die Betriebsart ein.
-`SaxPowerBridgeChargeSwitch` stellt dieselbe Config-Entry-Option als Schalter
+Die Number-Entity `bridge_charge_min_energy_kwh` und der Optionsdialog nutzen
+dieselbe Config-Entry-Option für die Mindestlademenge. Für Bestandsinstallationen gilt ohne Eintrag
+weiter 1,0 kWh. Zulässig sind 0,5 bis 100 kWh in 0,1-kWh-Schritten. Das Dashboard
+bietet die Eingabe in dieser Betriebsart an und speichert sie gemeinsam mit
+den SOC-Werten über `set_charging_settings`. Alle Felder werden vor der Annahme
+validiert. Eine Änderung der wirksamen Mindestmenge entwertet den gebundenen
+Plan und widerruft die Freigabe für laufende Modbus-Befehle. Der vorhandene
+Worker gleicht das Gerät nach der Bestätigung der Softwarewerte ab.
+`SaxPowerBridgeChargeSwitch` stellt `bridge_charge_enabled` als Schalter
 in der Dashboard-Karte `ChargePlan.vue` bereit. Einschalten prüft wie der
 Optionsdialog den zeitvariablen Tarif und die ausgewählte PV-Quelle; Ausschalten
 bleibt ohne diese Voraussetzungen möglich. Der bestehende Options-Listener
@@ -1201,7 +1209,7 @@ Die PV-Verfügbarkeit wird zusätzlich im periodischen Writer und vor sowie
 nach den beiden Gerätequittierungen geprüft.
 Bei planmäßigem Verlauf beenden das erreichte SOC-Ziel oder das geplante
 Ende den Auftrag. Maßgeblich für das Mindestziel ist der gemessene SOC-Zuwachs
-seit Beginn der Ladung. Die Kapazität bestimmt den zu 1 kWh passenden
+seit Beginn der Ladung. Die Kapazität bestimmt den zur Mindestlademenge passenden
 SOC-Zuwachs und das effektive Netzlade-Max-SOC begrenzt ihn. Zeigen frische
 Messwerte am geplanten Ende einen kleineren Zuwachs, darf dieselbe Ladung
 bis zum Erreichen des Mindestziels weiterlaufen. Das Ende des ursprünglich

@@ -63,6 +63,7 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
         : translationKey;
     if (
       key !== "bridge_charge_enabled" &&
+      key !== "bridge_charge_min_energy_kwh" &&
       !general.includes(key) &&
       !economics.includes(key) &&
       key !== "charging_pv_forecast" &&
@@ -130,6 +131,10 @@ function example({ domain, key, entity_id }) {
   if (key === "price_charge_hours") {
     state = "4";
     attributes = { min: 1, max: 24, step: 1, unit_of_measurement: "h" };
+  }
+  if (key === "bridge_charge_min_energy_kwh") {
+    state = "1";
+    attributes = { min: 0.5, max: 100, step: 0.1, unit_of_measurement: "kWh" };
   }
   const values = {
     soc: "63.5",

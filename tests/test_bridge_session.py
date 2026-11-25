@@ -54,9 +54,9 @@ def _prepare(
     )
 
 
-def _started() -> BridgeChargeSession:
+def _started(**values: Any) -> BridgeChargeSession:
     session = BridgeChargeSession()
-    assert _prepare(session)
+    assert _prepare(session, **values)
     session.mark_started()
     return session
 
@@ -165,16 +165,32 @@ def test_actual_energy_shortfall_is_reported_when_deadline_expires() -> None:
     assert session.attributes["shortfall_kwh"] == pytest.approx(1.2)
 
 
-def test_slow_charge_continues_past_estimated_end_until_minimum_soc() -> None:
-    session = _started()
+@pytest.mark.parametrize(
+    ("minimum_wh", "minimum_soc"), [(None, 20), (500, 15), (1500, 25)]
+)
+def test_slow_charge_continues_past_estimated_end_until_minimum_soc(
+    minimum_wh: int | None, minimum_soc: int
+) -> None:
+    settings = {} if minimum_wh is None else {"minimum_charge_energy_wh": minimum_wh}
+    session = _started(**settings)
     assert session.plan is not None and session.plan.end is not None
     nominal_end = session.plan.end
     assert _prepare(
-        session, now=nominal_end, observation={}, data={"battery_soc": 19.9}
+        session,
+        now=nominal_end,
+        observation={},
+        data={"battery_soc": minimum_soc - 0.1},
+        **settings,
     )
-    assert session.target_soc_at(nominal_end) == 20
+    assert session.target_soc_at(nominal_end) == minimum_soc
     finished = nominal_end + timedelta(minutes=1)
-    assert not _prepare(session, now=finished, observation={}, data={"battery_soc": 20})
+    assert not _prepare(
+        session,
+        now=finished,
+        observation={},
+        data={"battery_soc": minimum_soc},
+        **settings,
+    )
     assert session.completed_at == finished
 
 

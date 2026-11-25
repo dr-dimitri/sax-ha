@@ -7,7 +7,12 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from ..domain.bridge_charge import BridgeChargePlan, ChargeWindow, plan_bridge_charge
+from ..domain.bridge_charge import (
+    DEFAULT_MIN_BRIDGE_CHARGE_ENERGY_WH,
+    BridgeChargePlan,
+    ChargeWindow,
+    plan_bridge_charge,
+)
 from ..domain.discharge_forecast import MAX_OBSERVATION_MINUTES
 
 
@@ -172,6 +177,7 @@ class BridgeChargeSession:
         max_soc: float,
         windows: Sequence[ChargeWindow],
         fingerprint: object,
+        minimum_charge_energy_wh: float = DEFAULT_MIN_BRIDGE_CHARGE_ENERGY_WH,
     ) -> bool:
         """Return whether an existing or newly computed bounded charge is due."""
         now = now.astimezone(UTC)
@@ -225,6 +231,7 @@ class BridgeChargeSession:
             max_soc=max_soc,
             charge_power_w=data.get("ic_max_power_reference"),
             windows=windows,
+            minimum_charge_energy_wh=minimum_charge_energy_wh,
         )
         plan = self.plan
         self.status = (

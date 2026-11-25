@@ -148,7 +148,13 @@ requirement_bridge_charge:
     ersetzt. Netzladen Max. SOC und die globale Max-SOC-Grenze begrenzen
     weiterhin das Ziel. Ohne Bedarf findet keine geplante Netzladung statt.
     Bei Bedarf beträgt der geplante Energiezuwachs im Speicher mindestens
-    1 kWh. Der freie Platz bis zum wirksamen Netzladen Max. SOC begrenzt
+    bridge_charge_min_energy_kwh. Der Standardwert ist 1,0 kWh und gilt auch
+    ohne vorhandenen Eintrag. Zulässig sind 0,5 bis 100 kWh in 0,1-kWh-Schritten.
+    Das Dashboard bietet die Einstellung neben dem maximalen Netzladeziel
+    für diese Ladeweise an. Number-Entity und Optionsdialog lesen und speichern
+    dieselbe Config-Entry-Option. Das Dashboard validiert und speichert den
+    Wert gemeinsam mit den SOC-Einstellungen über set_charging_settings.
+    Der freie Platz bis zum wirksamen Netzladen Max. SOC begrenzt
     die Mindestlademenge. Reicht die Zeit im Tarifabschnitt bis PV-Start
     für diese gegebenenfalls begrenzte Menge nicht aus, beginnt dort
     kein Auftrag.
@@ -162,7 +168,7 @@ requirement_bridge_charge:
     vom Netz gedeckt; dies verringert ebenfalls den Überbrückungsbedarf.
     Ein Auftrag ist zusammenhängend und endet innerhalb eines erlaubten
     Intervalls spätestens zum PV-Start. Bei gleicher Bedarfsdeckung haben
-    Kandidaten mit mindestens 1 kWh Vorrang. Danach entscheiden Preis und
+    Kandidaten mit voller Mindestlademenge Vorrang. Danach entscheiden Preis und
     spätester Start. Gegenüber diesem
     spätesten Start zieht die Planung den gesamten Ladeblock um bis zu
     zehn Minuten vor. Die aktuelle Uhrzeit, der Beginn des erlaubten
@@ -235,8 +241,9 @@ requirement_bridge_charge:
     zum geplanten Endzeitpunkt. Frische SOC- und Kapazitätsmesswerte bestimmen
     den tatsächlichen Energiezuwachs seit Ladebeginn. Zeigen sie am geplanten
     Ende einen Zuwachs unterhalb der wirksamen Mindestmenge, setzt der Auftrag
-    die Ladung bis zum Mindestziel fort. Dieses Ziel entspricht 1 kWh Zuwachs
-    oder dem bei Ladebeginn verfügbaren Platz bis zum wirksamen Netzladen
+    die Ladung bis zum Mindestziel fort. Dieser Energiezuwachs entspricht der
+    eingestellten Mindestlademenge oder dem bei Ladebeginn verfügbaren Platz bis
+    zum wirksamen Netzladen
     Max. SOC, falls dieser kleiner ist. Bei einem höheren Planziel endet die
     Verlängerung ebenfalls am Mindestziel. Das ursprüngliche Tarifende und
     der im Plan gebundene PV-Start begrenzen die Ladung in jedem Fall.
@@ -326,7 +333,8 @@ requirement_bridge_charge:
     - "Bei 0, 45 und 60 Sekunden altem as_of bleiben angenommene Snapshots bis zur nächsten regulären Abfrage nutzbar. Refresh, Timeout und frühere Wiederholungen verlängern keine alte Nutzungsfrist; Vertragsfehler, Quellenwechsel und absolute Altersgrenzen bleiben wirksam."
     - "tests/test_pv_bridge_forecast.py belegt bei 2-Sekunden-Polls über zehn Minuten zehn Serviceaufrufe auch bei dauerhaft abgelehnten Antworten. Nur HomeAssistantError/TimeoutError wechseln auf zehn Sekunden; empfangene Ablehnungen und lokale Verarbeitungsfehler beenden diesen Retry. Ein unveränderter Ablehnungsgrund erzeugt bis zu einer gültigen Antwort oder einem Quellenwechsel keinen weiteren Logeintrag."
     - "Reicht die Batterie bis PV-Start, lautet der Status not_needed und es gibt keinen Ladeauftrag."
-    - "Bei positivem Bedarf plant ein Auftrag mindestens 1 kWh Energiezuwachs im Speicher ein. Der verfügbare Platz bis zum wirksamen Netzladen Max. SOC kann die Mindestmenge reduzieren. Ein Tarifabschnitt, der bis zum PV-Start zu kurz für die so bestimmte Menge ist, startet keinen Auftrag."
+    - "Bei positivem Bedarf plant ein Auftrag mindestens den eingestellten Energiezuwachs im Speicher ein. Der verfügbare Platz bis zum wirksamen Netzladen Max. SOC kann die Mindestmenge reduzieren. Ein Tarifabschnitt, der bis zum PV-Start zu kurz für die so bestimmte Menge ist, startet keinen Auftrag."
+    - "Mindestladung und SOC-Einstellungen werden im Dashboard gemeinsam übernommen. Werte unter 0,5 kWh, über 100 kWh und außerhalb des 0,1-kWh-Rasters werden abgelehnt. Bestätigte Werte und Entwürfe bleiben bei Fehlern erhalten. Eine wirksame Änderung entwertet den laufenden Plan auch bei blockiertem Geräteabgleich und während beider Quittierungsphasen."
     - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
     - "Bei ausreichendem Spielraum beginnen und enden Voll- und Teilaufträge zehn Minuten früher. Mit weniger Spielraum wird nur der verfügbare Vorlauf genutzt. Ladedauer, Lademenge und berechneter Fehlbetrag bleiben erhalten."
     - "Ein nicht vollständig deckbarer Bedarf bleibt als shortfall_kwh sichtbar, auch wenn eine Teilaufladung bereits läuft."

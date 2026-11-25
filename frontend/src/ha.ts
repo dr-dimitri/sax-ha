@@ -614,6 +614,7 @@ export function useSaxDashboard(
       "max_soc",
       "timed_charge_min_soc",
       "timed_charge_max_soc",
+      "bridge_charge_min_energy_kwh",
       "price_charge_max_price",
       "price_charge_hours",
       "price_charge_neutral_price",

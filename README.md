@@ -250,7 +250,8 @@ günstigen Tarifzeiten, etwa einem Nachttarif. Die Einrichtung hat drei Schritte
    in den günstigsten Zeiten bis zu deinem eingestellten Prozentwert laden
    soll. **Nur Bedarf bis Solarstrom** prüft anhand einer PV-Prognose, ob bis
    zum erwarteten Solarstrom Energie fehlt. Bei Bedarf plant die Integration
-   mindestens 1 kWh zusätzliche Batterieenergie bis zur eingestellten Obergrenze.
+   die eingestellte Mindestladung ein, standardmäßig 1 kWh. Das maximale
+   Netzladeziel begrenzt die Lademenge.
 3. **Automatik einschalten:** Schließe die Bearbeitung und aktiviere **Automatische Netzladung**, sobald
    die Einstellungen passen. Einschalten erlaubt die Ladung unter den
    angezeigten Bedingungen; es bedeutet nicht, dass der Speicher sofort lädt.
@@ -364,7 +365,10 @@ Ein abgelehnter Speicherversuch erhält deine Eingaben und die bisherigen Werte.
 **Netzladung aktiv** muss ebenfalls eingeschaltet sein. Die ausgewählten
 Monate gelten weiterhin. Die Planung berechnet aus dem Verbrauch der letzten
 1 bis 15 Minuten, ob der Speicher bis zum erwarteten PV-Start reicht. Fehlt
-Energie, plant sie mindestens **1 kWh zusätzliche Energie im Speicher** ein.
+Energie, plant sie mindestens die unter **Mindestladung (kWh)** eingestellte
+Energiemenge für den Speicher ein. Du findest den Wert neben dem maximalen
+Netzladeziel. Er ist in **0,1-kWh-Schritten** von **0,5 bis 100 kWh** einstellbar
+und steht standardmäßig auf **1,0 kWh**.
 Lassen **Netzladen Max. SOC** oder die globale Grenze **Max. SOC** weniger Platz,
 begrenzt der verfügbare Platz die Lademenge. Die Bedarfsberechnung ersetzt die
 Startschwelle **Netzladung Min. SOC**.

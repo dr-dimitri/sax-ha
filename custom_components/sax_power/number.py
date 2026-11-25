@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
     PERCENTAGE,
+    EntityCategory,
     UnitOfEnergy,
     UnitOfTime,
 )
@@ -14,6 +15,8 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
+    BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
+    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     DATA_COORDINATOR,
     DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_HOURS,
@@ -22,10 +25,12 @@ from .const import (
     DEFAULT_TIMED_CHARGE_MIN_SOC,
     DOMAIN,
     GRID_SERVING_FORECAST_THRESHOLD_STEP_KWH,
+    MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
     MAX_SOC,
+    MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     MIN_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MIN_PRICE_HOURS,
     MIN_PRICE_LIMIT,
@@ -65,6 +70,7 @@ async def async_setup_entry(
             SaxPowerMaxSocNumber(coordinator, entry.entry_id),
             SaxPowerTimedChargeMaxSocNumber(coordinator, entry.entry_id),
             SaxPowerTimedChargeMinSocNumber(coordinator, entry.entry_id),
+            SaxPowerBridgeChargeMinEnergyNumber(coordinator, entry.entry_id),
             SaxPowerGridServingForecastThresholdNumber(coordinator, entry.entry_id),
             SaxPowerPriceLimitNumber(coordinator, entry.entry_id),
             SaxPowerPriceNeutralPriceNumber(coordinator, entry.entry_id),
@@ -214,6 +220,30 @@ class SaxPowerTimedChargeMinSocNumber(SaxPowerRestoreConfigEntity, NumberEntity)
         await self.coordinator.async_set_timed_charge_min_soc(
             int(value), defer_device_update=True
         )
+        self.async_write_ha_state()
+
+
+class SaxPowerBridgeChargeMinEnergyNumber(SaxPowerConfigEntity, NumberEntity):
+    """Share the minimum stored energy per bridge charge with the options flow."""
+
+    _attr_translation_key = CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH
+    _attr_native_max_value = MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH
+    _attr_native_step = BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._assign_ids("number", CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH)
+
+    @property
+    def native_value(self) -> float:
+        return self.coordinator.bridge_charge_min_energy_kwh
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_bridge_charge_min_energy_kwh(value)
         self.async_write_ha_state()
 
 

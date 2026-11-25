@@ -9,18 +9,23 @@ müssen (siehe tests/test_integration_live.py für den vollen End-to-End-Pfad).
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.components.number import NumberMode
-from homeassistant.core import State
+from homeassistant.const import EntityCategory, UnitOfEnergy
+from homeassistant.core import HomeAssistant, State
 
 from custom_components.sax_power.const import (
+    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_HOURS,
     DEFAULT_PRICE_LIMIT,
     DEFAULT_PRICE_NEUTRAL,
     DEFAULT_TIMED_CHARGE_MIN_SOC,
+    DOMAIN,
     MAX_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     MAX_PRICE_HOURS,
     MAX_PRICE_LIMIT,
@@ -31,6 +36,7 @@ from custom_components.sax_power.const import (
 )
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.number import (
+    SaxPowerBridgeChargeMinEnergyNumber,
     SaxPowerGridServingForecastThresholdNumber,
     SaxPowerMaxSocNumber,
     SaxPowerPriceChargeHoursNumber,
@@ -39,6 +45,7 @@ from custom_components.sax_power.number import (
     SaxPowerTimedChargeMaxSocNumber,
     SaxPowerTimedChargeMinSocNumber,
 )
+from tests.ha import MockConfigEntry
 
 
 @pytest.fixture
@@ -125,6 +132,31 @@ async def test_timed_charge_max_soc_keeps_configured_limits_during_calibration(
     assert entity.native_value == 60
     assert entity.native_max_value == 80
     assert coordinator.effective_timed_charge_max_soc == 100
+
+
+async def test_bridge_minimum_number_accepts_and_persists_without_waiting_for_device(
+    hass: HomeAssistant, coordinator: SaxPowerCoordinator
+) -> None:
+    """REQ-BRIDGE-CHARGE: The numbers entity shares the config entry option."""
+    entry = MockConfigEntry(domain=DOMAIN, entry_id=coordinator.entry_id)
+    entry.add_to_hass(hass)
+    entity = SaxPowerBridgeChargeMinEnergyNumber(coordinator, entry.entry_id)
+    _prepare_entity(entity, hass, entity.entity_id, None)
+    coordinator.last_update_success = False
+    assert entity.available
+    assert entity.native_value == DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH
+    assert entity.native_unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
+    assert entity.native_min_value == 0.5
+    assert entity.native_max_value == 100
+    assert entity.native_step == 0.1
+    assert entity.entity_category is EntityCategory.CONFIG
+    assert entity.mode is NumberMode.BOX
+
+    async with coordinator._charge_control_lock:
+        await asyncio.wait_for(entity.async_set_native_value(0.7), timeout=1)
+        assert entity.native_value == 0.7
+        assert entry.options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] == 0.7
+        entity.async_write_ha_state.assert_called_once_with()
 
 
 async def test_timed_charge_min_soc_seeds_to_default_on_fresh_install(

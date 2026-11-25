@@ -1065,11 +1065,11 @@ keinen neuen Messzeitpunkt.
 
 `application/fixed_time_charge.py` bestimmt die tägliche Freigabe in lokaler
 HA-Zeit. Der getrennte Store `infrastructure/fixed_time_charge_store.py`
-speichert Startzeit, Kalendertag und Abschluss. Dadurch setzt ein Neustart
-eine noch laufende Ladung fort, ohne einen bereits erreichten Tagesauftrag
-erneut zu starten. Eine neue Konfiguration holt vor der heutigen Startzeit
-keinen gestrigen Termin nach. Eine bei der Zeitumstellung fehlende lokale
-Uhrzeit verschiebt sich um die Zeitlücke nach vorn; doppelte Uhrzeiten
+speichert Startzeit, Kalendertag und Abschluss. Vor der heutigen Startzeit
+kann ein Neustart einen offenen Auftrag vom Vortag fortsetzen. Ältere
+Aufträge verfallen. Auch der periodische Schreiber prüft, zu welchem
+Termin seine Freigabe gehört. Eine bei der Zeitumstellung fehlende lokale
+Uhrzeit verschiebt sich um die Zeitlücke nach vorn. Doppelte Uhrzeiten
 verwenden den ersten Termin.
 
 Die reine Ladepolicy bildet die feste Uhrzeit auf dieselbe priorisierte
@@ -2350,12 +2350,15 @@ SunSpec-HIGH-Sensoren zeigen "unbekannt", bis der Block wieder lesbar ist
 das Update ebenfalls nicht fehlschlagen – die betroffenen
 Diagnose-Sensoren behalten ihren letzten Wert. Ein dauerhafter
 HIGH-Ausfall wird zusätzlich als Home-Assistant-Repair-Issue angezeigt.
-Vor dem ersten erfolgreichen LOW-Read bleibt `battery_capacity` unbekannt,
-auch wenn der HIGH-Block erreichbar ist. So gelangen keine Kapazitätswerte
-mit lediglich angenommenem Skalierungsfaktor in Anzeige oder Berechnungen.
-Nach dem ersten Erfolg behalten spätere LOW-Ausfälle den bestätigten Faktor.
-`tests/test_coordinator.py` prüft Startausfall, Wiederherstellung mit einem
-Faktor ungleich 0 sowie den späteren Ausfall für beide LOW-Teilblöcke.
+Solange die LOW-Skalierungsfaktoren fehlen, sind Kapazität, Batterie-SOC
+samt Grenzen, Entladetiefe, verfügbare Lade- und Entladeleistung und
+mittlere Zellspannung unbekannt. Basic-SOC und die unabhängig skalierten
+HIGH-Messwerte bleiben verfügbar. Neue oder geänderte Faktoren lösen
+im selben Poll eine frische HIGH-Messung aus. Bei späteren LOW-Ausfällen
+gelten die zuletzt bestätigten Faktoren weiter.
+Ein einzelner LOW-Fehler wird beim nächsten Poll erneut geprüft. Nach
+dem zweiten Fehler liegen mindestens 60 Sekunden zwischen den Versuchen.
+Die Startwarnung erscheint einmal pro Ausfallphase.
 
 Die genaue Zuordnung Protokolladresse ↔ interne Adresse ↔ Bedeutung steht in
 `modbus_llm.yaml`; `const.py` referenziert nur die intern verwendeten

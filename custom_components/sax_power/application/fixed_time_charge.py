@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as dt_time
 
 
@@ -16,6 +16,14 @@ class FixedTimeChargeState:
     completed: bool = False
 
 
+def latest_charge_day(now: datetime, start: dt_time) -> date:
+    """Local date of the most recent scheduled start, across both DST changes."""
+    today = now.date()
+    # The first fold and a forward shift over a spring gap are intentional.
+    occurrence = datetime.combine(today, start, now.tzinfo).astimezone(UTC)
+    return today if now.astimezone(UTC) >= occurrence else today - timedelta(days=1)
+
+
 def fixed_time_charge_state(
     previous: FixedTimeChargeState | None,
     *,
@@ -24,14 +32,14 @@ def fixed_time_charge_state(
     target_reached: bool,
 ) -> FixedTimeChargeState | None:
     """Resume yesterday only with proof; a fresh setup never backfills it."""
-    if previous is not None and (previous.start != start or previous.day > now.date()):
+    today = now.date()
+    day = latest_charge_day(now, start)
+    if previous is not None and (
+        previous.start != start or previous.day not in (day, today)
+    ):
         previous = None
-    # Resolve a repeated local hour to its first occurrence. On spring-forward
-    # days the UTC roundtrip moves a nonexistent time forward by the DST gap.
-    occurrence = datetime.combine(now.date(), start, now.tzinfo).astimezone(UTC)
-    if now.astimezone(UTC) >= occurrence:
-        if previous is None or previous.day != now.date():
-            previous = FixedTimeChargeState(start, now.date())
-    if previous is not None and target_reached:
+    if day == today and (previous is None or previous.day != day):
+        previous = FixedTimeChargeState(start, day)
+    if previous is not None and previous.day == day and target_reached:
         previous = replace(previous, completed=True)
     return previous

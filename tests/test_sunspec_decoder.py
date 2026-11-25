@@ -215,8 +215,7 @@ def test_decode_low_blocks_reads_battery_scale_factors() -> None:
 
 
 def test_default_battery_scale_factors_are_neutral() -> None:
-    """Vorgabewert vor dem ersten LOW-Read: alle vier Faktoren 0 (= Faktor 1),
-    was laut modbus_llm.yaml zugleich der "wellknown"-Wert des Geräts ist."""
+    """Laut modbus_llm.yaml entsprechen alle vier üblichen Exponenten dem Faktor 1."""
     assert DEFAULT_BATTERY_SCALE_FACTORS == BatteryScaleFactors(0, 0, 0, 0)
 
 

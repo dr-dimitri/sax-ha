@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -217,6 +218,61 @@ async def test_unfinished_charge_resumes_after_midnight_and_restart(
     finally:
         await coordinator.async_shutdown()
         await restored.async_shutdown()
+
+
+async def test_restart_does_not_resume_a_superseded_daily_charge(
+    hass: HomeAssistant,
+) -> None:
+    """REQ-FIXED-TIME-GRID-CHARGE: missed daily starts supersede an old run."""
+    restored = _coordinator(hass, start="23:30:00")
+    store = FixedTimeChargeStateStore(hass, ENTRY_ID)
+    await store.async_save(
+        FixedTimeChargeState(dt_time(23, 30), _local("2026-10-21").date())
+    )
+    try:
+        await restored.async_load_timed_charge_state()
+        with _at("2026-10-23T05:00:00"):
+            await restored._async_enforce_grid_charge(restored.data)
+        restored.client.write_register.assert_not_awaited()
+        assert not restored._timed_charge_active
+        assert await FixedTimeChargeStateStore(hass, ENTRY_ID).async_load() is None
+
+        with _at("2026-10-23T23:30:00"):
+            await restored._async_enforce_grid_charge(restored.data)
+        assert restored._timed_charge_active
+        assert restored._fixed_time_charge_state.day == _local("2026-10-23").date()
+    finally:
+        await restored.async_shutdown()
+
+
+async def test_periodic_write_cannot_extend_a_superseded_daily_charge(
+    hass: HomeAssistant,
+) -> None:
+    """REQ-FIXED-TIME-GRID-CHARGE: check the occurrence before the next poll."""
+    coordinator = _coordinator(hass)
+    try:
+        with (
+            _at("2026-10-21T02:00:00"),
+            patch.object(coordinator, "_sun_ic_write_interval", return_value=0.01),
+        ):
+            await coordinator._async_enforce_grid_charge(coordinator.data)
+            writer = coordinator._sun_charge_task
+            assert writer is not None
+            coordinator.client.write_register.reset_mock()
+            with _at("2026-10-23T01:59:59"):
+                with pytest.raises(HomeAssistantError, match="Netzladefreigabe"):
+                    await coordinator._async_write_sun_charge_setpoint()
+                coordinator.client.write_register.assert_not_awaited()
+                await asyncio.wait_for(writer, 1)
+                await hass.async_block_till_done()
+            coordinator.client.write_register.assert_awaited_once_with(
+                address=REG_SUN_IC_CONTROL_MODE,
+                value=SUN_IC_CONTROL_MODE_SMARTMETER,
+                device_id=100,
+            )
+            assert not coordinator._timed_charge_active
+    finally:
+        await coordinator.async_shutdown()
 
 
 @pytest.mark.parametrize(

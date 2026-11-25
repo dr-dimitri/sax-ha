@@ -783,13 +783,14 @@ requirement_fixed_time_grid_charge:
     entsteht erst am folgenden täglichen Starttermin. Der Laufzeitzustand
     einschließlich Abschluss wird separat gespeichert. Eine noch laufende
     Ladung kann über Mitternacht und nach einem Neustart fortgesetzt werden;
-    eine abgeschlossene Ladung startet nach Neustart nicht erneut. Ohne
-    gespeicherte Sitzung wird vor der heutigen Startzeit kein gestriger
-    Auftrag nachgeholt; nach der heutigen Startzeit kann der heutige Auftrag
-    beginnen. Wirksam abgeglichene Änderungen der Startzeit oder Ladeweise
-    und das Ausschalten verwerfen alte Freigaben. Schnelle Änderungen werden
-    auf den zuletzt angenommenen Stand zusammengefasst. Entladesperren bisheriger Tarifzeitfenster
-    werden nicht auf diese Ladeweise übertragen.
+    eine abgeschlossene Ladung startet nach Neustart nicht erneut. Vor dem
+    heutigen Start ist nur ein offener Auftrag vom unmittelbar vorherigen
+    lokalen Kalendertag gültig. Neustart und periodischer Sollwertschreiber
+    prüfen diese Bindung. Ohne gültige Sitzung kann der heutige Auftrag ab
+    der eingestellten Startzeit beginnen. Wirksam abgeglichene Änderungen der
+    Startzeit oder Ladeweise und das Ausschalten verwerfen alte Freigaben.
+    Schnelle Änderungen werden auf den zuletzt angenommenen Stand zusammengefasst.
+    Entladesperren bisheriger Tarifzeitfenster werden nicht auf diese Ladeweise übertragen.
 
     Der tägliche Termin verwendet bei einer doppelt vorkommenden lokalen
     Uhrzeit das erste Vorkommen; eine bei der Sommerzeitumstellung fehlende
@@ -823,7 +824,7 @@ requirement_fixed_time_grid_charge:
     übernimmt sichere Geräteübergänge nach laufenden Quittierungssequenzen.
   acceptance_criteria:
     - "Vor der Startzeit beginnt kein neuer Auftrag; ab Start lädt auch ein SOC oberhalb der bisherigen Startschwelle bis zum Netzladeziel. Bereits erreichtes Ziel startet keine Ladung."
-    - "Tageswechsel, Neustart, täglicher Abschluss, deaktivierte Automatik/Monate, fehlender SOC und globale Obergrenze sind abgedeckt."
+    - "Tageswechsel, Neustart, täglicher Abschluss, deaktivierte Automatik/Monate, fehlender SOC und globale Obergrenze sind abgedeckt. Ein veralteter Auftrag löst vor dem heutigen Start weder beim Wiederherstellen noch beim periodischen Schreiben eine Netzladung aus."
     - "Beide Tarifarten verwenden dasselbe Netzladeziel und dieselbe feste Startzeit; Preis-/Prognoseausfälle erteilen oder entziehen keine zeitbasierte Freigabe."
     - "Der blaue Ladeplanungshinweis folgt bestätigten Startzeitänderungen in DE/EN bei beiden Tarifarten; Entwürfe/fehlgeschlagene Übernahmen ändern ihn nicht und echte laufende Ladung hat Vorrang."
     - "Echte WebSocket-Tests prüfen atomare Validierung, Revisionskonflikte, belegte Geräte-Locks sowie verzögerte/fehlgeschlagene Modus- und Sollwertantworten bei Start und periodischem Schreiben."
@@ -2277,12 +2278,17 @@ requirement_low_interval_registers:
     - "Ein Scheitern des LOW-Intervall-Reads (bei ansonsten erreichbarem
        SunSpec-Modus) lässt das Update nicht fehlschlagen - die zuletzt
        gelesenen Werte bleiben erhalten, bis der nächste Refresh gelingt."
-    - "Bis zum ersten erfolgreichen LOW-Read bleibt battery_capacity
-       unbekannt: Der anfängliche Vorgabefaktor 0 darf keine Kapazität für
-       Anzeige, Ladeplanung, Entladeprognose oder Energiebilanz bestätigen.
-       Nach erfolgreichem Lesen bleibt der bestätigte Faktor bei späteren
-       LOW-Ausfällen erhalten. Das gilt auch bei einem reinen LOW1-Ausfall,
-       da die beiden Teilblöcke gemeinsam übernommen werden."
+    - "Kapazität, verfügbare Lade- und Entladeleistung, Batterie-SOC samt
+       Grenzen, Entladetiefe und mittlere Zellspannung werden erst mit den
+       vom Gerät gelesenen Skalierungsfaktoren veröffentlicht. Das gilt auch
+       bei einem reinen LOW1-Ausfall, da beide LOW-Teilblöcke zusammengehören.
+       Bestätigte Faktoren bleiben bei späteren LOW-Ausfällen erhalten.
+       Neue oder geänderte Faktoren lösen im selben Poll einen HIGH-Read aus."
+    - "Nach dem ersten LOW-Lesefehler erfolgt der nächste Versuch beim
+       folgenden Poll. Scheitert auch dieser, wartet jeder weitere Versuch
+       mindestens 60 Sekunden. Ein Startausfall erzeugt eine Warnung je
+       Ausfallphase. Nach erfolgreicher Erholung gilt das reguläre
+       LOW-Intervall. Basic- und HIGH-Reads behalten ihren eigenen Takt."
     - "Sicherheits-/steuerungsrelevante Register (SOC, Zustände,
        Fehlercodes, Smart-Meter-Leistung) bleiben ausdrücklich im
        HIGH-Block und werden weiterhin bei jedem Poll gelesen."

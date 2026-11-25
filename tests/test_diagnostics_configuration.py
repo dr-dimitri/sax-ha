@@ -31,6 +31,7 @@ from custom_components.sax_power.const import (
     DOMAIN,
     READ_BLOCK_EXT_LOW1_START,
     READ_BLOCK_EXT_LOW2_START,
+    READ_BLOCK_EXT_START,
     REG_SUN_BATTERY_CAPACITY,
     REG_SUN_BATTERY_CAPACITY_SF,
     economics_tou_window_key,
@@ -108,7 +109,13 @@ async def test_export_preserves_device_capacity_in_wh_without_polling(
 
     client.read_holding_registers.side_effect = read
     coordinator.data.update(await coordinator._async_read_extended())
-    assert client.read_holding_registers.await_count == 3
+    expected_reads = [READ_BLOCK_EXT_LOW1_START]
+    if low_readable:
+        expected_reads.append(READ_BLOCK_EXT_LOW2_START)
+    expected_reads.append(READ_BLOCK_EXT_START)
+    assert [
+        call.kwargs["address"] for call in client.read_holding_registers.await_args_list
+    ] == expected_reads
     client.read_holding_registers.reset_mock()
     before = deepcopy(coordinator.data)
 

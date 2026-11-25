@@ -44,7 +44,11 @@ from .application.economics import (
     prior_result_eur_from_options,
     tariff_config_from_options,
 )
-from .application.fixed_time_charge import FixedTimeChargeState, fixed_time_charge_state
+from .application.fixed_time_charge import (
+    FixedTimeChargeState,
+    fixed_time_charge_state,
+    latest_charge_day,
+)
 from .application.ports import ModbusClient
 from .application.tariff_charge import tariff_charge_state
 from .application.tariff_profiles import bridge_configuration_error
@@ -115,6 +119,7 @@ from .const import (
     READ_BLOCK_EXT_LOW2_COUNT,
     READ_BLOCK_EXT_LOW2_START,
     READ_BLOCK_EXT_LOW_INTERVAL,
+    READ_BLOCK_EXT_LOW_RETRY_INTERVAL,
     READ_BLOCK_EXT_START,
     READ_BLOCK_START,
     REG_SETPOINT_COSPHI,
@@ -166,8 +171,8 @@ from .domain.registers import (
 )
 from .domain.scheduling import is_time_in_window, windows_overlap
 from .domain.sunspec import (
-    DEFAULT_BATTERY_SCALE_FACTORS,
     DEFAULT_IC_POWER_SETPOINT_SF_RAW,
+    BatteryScaleFactors,
     SunSpecDecodeError,
     decode_high_block,
     decode_low_blocks,
@@ -634,7 +639,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Werten übergeben, statt sie bei jedem Poll erneut zu lesen.
         self._low_block_data: dict[str, Any] = {}
         self._low_block_last_read: float | None = None
-        self._battery_scale_factors = DEFAULT_BATTERY_SCALE_FACTORS
+        self._low_block_retry_at: float | None = None
+        self._battery_scale_factors: BatteryScaleFactors | None = None
         # Energy-Dashboard-Kompatibilität (REQ-ENERGY-DASHBOARD): Der
         # Coordinator hält die abgeleiteten Zähler unabhängig vom sichtbaren
         # RestoreEntity-Zustand in einem versionierten Store. None bedeutet
@@ -1014,6 +1020,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             and state is not None
             and not state.completed
             and state.start == self.fixed_time_charge_start
+            and state.day == latest_charge_day(now, state.start)
         )
 
     async def _async_prepare_fixed_time_charge(
@@ -1809,6 +1816,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _economics_soc_resolution_percent(self) -> float:
         """Messquantum des Battery-SOC in Prozent, konservativ 1 %."""
+        if self._battery_scale_factors is None:
+            return 1.0
         exponent = decode_sunssf(self._battery_scale_factors.soc)
         if exponent is None:
             return 1.0
@@ -3035,9 +3044,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "low_sample_age_seconds": low_age,
                 # LOW values remain usable after a failed refresh; this is
                 # polling evidence, not a control veto (REQ-LOW-INTERVAL-REGISTERS).
-                "low_refresh_due": (
-                    low_age is None or low_age >= READ_BLOCK_EXT_LOW_INTERVAL
-                ),
+                "low_refresh_due": self._low_block_read_due(now),
                 "low_refresh_interval_seconds": READ_BLOCK_EXT_LOW_INTERVAL,
             },
             "writer": {
@@ -3212,16 +3219,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # die Sentinel-Prüfung dieses Rohwerts eigenständig vor jedem Write.
         self._ic_power_setpoint_sf_raw = decoded.ic_power_setpoint_sf_raw
         self._high_data = dict(decoded.values)
-        # REQ-LOW-INTERVAL-REGISTERS: Keine Kapazitätsprognose mit einem
-        # lediglich angenommenen, noch nicht vom Gerät bestätigten Faktor.
-        if self._low_block_last_read is None:
-            self._high_data["battery_capacity"] = None
         self._high_last_read = now
         self._high_sample_revision += 1
         self._high_sample_started_at = now
         self._high_sample_control_mode = decoded.values.get("ic_control_mode")
         self._high_sample_time = monotonic()
         return self._high_data
+
+    def _low_block_read_due(self, now: float) -> bool:
+        if self._low_block_retry_at is not None:
+            return now >= self._low_block_retry_at
+        return (
+            self._low_block_last_read is None
+            or now - self._low_block_last_read >= READ_BLOCK_EXT_LOW_INTERVAL
+        )
+
+    async def _async_read_low_registers(self, address: int, count: int) -> list[int]:
+        result = await self.client.read_holding_registers(
+            address=address, count=count, device_id=self.slave_id_extended
+        )
+        if result.isError():
+            raise ModbusException(
+                f"Modbus-Fehlerantwort (LOW-Intervall-Register {address}): {result}"
+            )
+        return result.registers
 
     async def _async_read_low_block(self) -> dict[str, Any]:
         """Liest die beiden statischen LOW-Intervall-Teilbereiche des
@@ -3235,31 +3256,25 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Refreshs werden die zuletzt gelesenen Werte weiterverwendet; ein
         Scheitern des Refreshs lässt das Update deshalb nicht fehlschlagen."""
         now = monotonic()
-        if (
-            self._low_block_data
-            and self._low_block_last_read is not None
-            and now - self._low_block_last_read < READ_BLOCK_EXT_LOW_INTERVAL
-        ):
+        if not self._low_block_read_due(now):
             return self._low_block_data
 
         try:
-            low1_result = await self.client.read_holding_registers(
-                address=READ_BLOCK_EXT_LOW1_START,
-                count=READ_BLOCK_EXT_LOW1_COUNT,
-                device_id=self.slave_id_extended,
+            low1 = await self._async_read_low_registers(
+                READ_BLOCK_EXT_LOW1_START, READ_BLOCK_EXT_LOW1_COUNT
             )
-            low2_result = await self.client.read_holding_registers(
-                address=READ_BLOCK_EXT_LOW2_START,
-                count=READ_BLOCK_EXT_LOW2_COUNT,
-                device_id=self.slave_id_extended,
+            low2 = await self._async_read_low_registers(
+                READ_BLOCK_EXT_LOW2_START, READ_BLOCK_EXT_LOW2_COUNT
             )
-            if low1_result.isError() or low2_result.isError():
-                raise ModbusException(
-                    "Modbus-Fehlerantwort (LOW-Intervall-Register): "
-                    f"{low1_result if low1_result.isError() else low2_result}"
-                )
-            decoded = decode_low_blocks(low1_result.registers, low2_result.registers)
+            decoded = decode_low_blocks(low1, low2)
         except (TimeoutError, ModbusException, SunSpecDecodeError) as err:
+            if self._low_block_retry_at is not None:
+                self._low_block_retry_at = (
+                    monotonic() + READ_BLOCK_EXT_LOW_RETRY_INTERVAL
+                )
+                return self._low_block_data
+            # Retry a transient failure on the next poll before spacing out attempts.
+            self._low_block_retry_at = now
             if self._low_block_data:
                 _LOGGER.debug(
                     "LOW-Intervall-Register (Slave-ID %s) nicht lesbar - "
@@ -3280,7 +3295,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Die Battery-Skalierungsfaktoren stammen ausschließlich aus diesem
         # Teilblock; decode_high_block bekommt sie beim nächsten HIGH-Read
         # übergeben, statt sie selbst zu lesen (REQ-LOW-INTERVAL-REGISTERS).
-        self._battery_scale_factors = decoded.scale_factors
+        if self._battery_scale_factors != decoded.scale_factors:
+            self._battery_scale_factors = decoded.scale_factors
+            self._high_last_read = None
+        self._low_block_retry_at = None
         self._low_block_data = decoded.values
         self._low_block_last_read = now
         return self._low_block_data
@@ -4497,6 +4515,13 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._shutdown_started
                     or self._tariff_control_revision != self._tariff_source_revision
                 ):
+                    return
+                if (
+                    self._fixed_time_charge_writing
+                    and self._sun_charge_power < 0
+                    and not self._fixed_time_charge_permitted(dt_util.now())
+                ):
+                    self._async_schedule_month_control_change()
                     return
                 if self._active_charge_deadline() is not None:
                     async with self._charge_control_lock:

@@ -307,6 +307,7 @@ REG_SUN_BATTERY_CELL_VOLTAGE_SF = 114  # Read - sunssf, wellknown 0
 # dadurch von 115 auf 93 Register, ohne dass dafür im Normalbetrieb
 # zusätzliche Requests nötig sind.
 READ_BLOCK_EXT_LOW_INTERVAL = 3600  # Sekunden
+READ_BLOCK_EXT_LOW_RETRY_INTERVAL = 60  # Sekunden bei anhaltendem Ausfall
 
 # Teilbereich 1: SunSpec Common Model (Hersteller, Modell, Firmware-Version,
 # Seriennummer) + Modellkopf von "3Ph Inverter" (Modell-ID/Länge) - direkt

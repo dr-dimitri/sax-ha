@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from homeassistant.components import persistent_notification
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -55,6 +56,10 @@ from custom_components.sax_power.const import (
     REG_SOC,
     REG_SUN_BATTERY_CAPACITY,
     REG_SUN_BATTERY_CAPACITY_SF,
+    REG_SUN_BATTERY_CELL_VOLTAGE_AVG,
+    REG_SUN_BATTERY_CELL_VOLTAGE_SF,
+    REG_SUN_BATTERY_CHARGE_POWER_AVAILABLE,
+    REG_SUN_BATTERY_POWER_SF,
     REG_SUN_BATTERY_SOC,
     REG_SUN_BATTERY_SOC_SF,
     REG_SUN_IC_CONTROL_MODE,
@@ -751,10 +756,10 @@ async def test_low_block_failure_does_not_fail_update(hass) -> None:
 @pytest.mark.parametrize(
     "failed_block", [READ_BLOCK_EXT_LOW1_START, READ_BLOCK_EXT_LOW2_START]
 )
-async def test_capacity_requires_confirmed_scaling_and_survives_later_low_failure(
-    hass, failed_block: int
+async def test_battery_values_require_confirmed_scaling_and_survive_later_low_failure(
+    hass: HomeAssistant, failed_block: int
 ) -> None:
-    """REQ-LOW-INTERVAL-REGISTERS: never plan with an assumed capacity factor."""
+    """REQ-LOW-INTERVAL-REGISTERS: publish only confirmed physical units."""
     client = _make_client()
     low_readable = False
 
@@ -767,11 +772,15 @@ async def test_capacity_requires_confirmed_scaling_and_survives_later_low_failur
         if device_id == 64:
             result.registers[REG_SOC - READ_BLOCK_START] = 55
         elif address == READ_BLOCK_EXT_START:
-            result.registers[REG_SUN_BATTERY_CAPACITY - READ_BLOCK_EXT_START] = 768
+            result.registers[REG_SUN_BATTERY_CAPACITY - address] = 768
+            result.registers[REG_SUN_BATTERY_SOC - address] = 550
+            result.registers[REG_SUN_BATTERY_CHARGE_POWER_AVAILABLE - address] = 460
+            result.registers[REG_SUN_BATTERY_CELL_VOLTAGE_AVG - address] = 331
         elif address == READ_BLOCK_EXT_LOW2_START:
-            result.registers[
-                REG_SUN_BATTERY_CAPACITY_SF - READ_BLOCK_EXT_LOW2_START
-            ] = 1
+            result.registers[REG_SUN_BATTERY_CAPACITY_SF - address] = 1
+            result.registers[REG_SUN_BATTERY_SOC_SF - address] = to_unsigned16(-1)
+            result.registers[REG_SUN_BATTERY_POWER_SF - address] = 1
+            result.registers[REG_SUN_BATTERY_CELL_VOLTAGE_SF - address] = 1
         return result
 
     client.read_holding_registers = AsyncMock(side_effect=read)
@@ -781,7 +790,11 @@ async def test_capacity_requires_confirmed_scaling_and_survives_later_low_failur
     ):
         first = await coordinator._async_update_data()
     assert first["soc"] == 55
-    assert first["battery_capacity"] is None
+    assert first["storage_power_active"] == 0
+    assert first["battery_charging_active"] is False
+    for field in HIGH_BLOCK_FIELDS:
+        if isinstance(field, ScaledField) and field.battery_scale_factor is not None:
+            assert first[field.key] is None, field.key
     coordinator.data = first
     assert coordinator.price_planner._context().capacity_kwh is None
 
@@ -790,7 +803,14 @@ async def test_capacity_requires_confirmed_scaling_and_survives_later_low_failur
         "custom_components.sax_power.coordinator.monotonic", return_value=1003.0
     ):
         recovered = await coordinator._async_update_data()
-    assert recovered["battery_capacity"] == 7680
+    expected = {
+        "battery_capacity": 7680,
+        "battery_soc": 55,
+        "battery_charge_power_available": 4600,
+        "battery_cell_voltage_avg": 3310,
+    }
+    for key, value in expected.items():
+        assert recovered[key] == pytest.approx(value)
     coordinator.data = recovered
     assert coordinator.price_planner._context().capacity_kwh == pytest.approx(7.68)
 
@@ -800,7 +820,46 @@ async def test_capacity_requires_confirmed_scaling_and_survives_later_low_failur
         return_value=1003.0 + READ_BLOCK_EXT_LOW_INTERVAL + 1,
     ):
         later = await coordinator._async_update_data()
-    assert later["battery_capacity"] == 7680
+    for key, value in expected.items():
+        assert later[key] == pytest.approx(value)
+
+
+async def test_persistent_low_outage_limits_reads_and_warnings_until_recovery(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """REQ-LOW-INTERVAL-REGISTERS: optional static data cannot monopolize polling."""
+    client = _make_client()
+    coordinator = _make_coordinator(hass, client)
+    attempts: list[float] = []
+    high_reads: list[float] = []
+    low_available = False
+
+    def read(*, address: int, count: int, device_id: int) -> MagicMock:
+        result = MagicMock()
+        result.registers = [0] * count
+        result.isError.return_value = False
+        if device_id == 100 and address == READ_BLOCK_EXT_LOW1_START:
+            attempts.append(clock)
+            result.isError.return_value = not low_available
+        elif device_id == 100 and address == READ_BLOCK_EXT_START:
+            high_reads.append(clock)
+        return result
+
+    client.read_holding_registers = AsyncMock(side_effect=read)
+    for clock in (1000, 1002, 1004, 1010, 1061, 1062):
+        low_available = clock == 1062
+        with patch(
+            "custom_components.sax_power.coordinator.monotonic", return_value=clock
+        ):
+            data = await coordinator._async_update_data()
+            telemetry = coordinator.charge_control_diagnostics["telemetry"]
+            assert telemetry["low_refresh_due"] is (clock == 1000)
+        assert data["storage_power_active"] == 0
+        assert ("sun_version_master" in data) is low_available
+        assert (data["battery_soc"] is not None) is low_available
+    assert attempts == [1000, 1002, 1062]
+    assert high_reads == [1000, 1002, 1004, 1010, 1061, 1062]
+    assert sum("LOW-Intervall-Register" in message for message in caplog.messages) == 1
 
 
 @pytest.mark.parametrize(

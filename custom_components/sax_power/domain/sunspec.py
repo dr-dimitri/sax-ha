@@ -152,9 +152,7 @@ class BatteryScaleFactors:
     cell_voltage: int = 0
 
 
-#: Ausgangszustand, solange der LOW-Block noch nie erfolgreich gelesen wurde.
-#: Entspricht dem bisherigen Coordinator-Verhalten (alle vier Rohwerte 0, was
-#: laut modbus_llm.yaml zugleich der "wellknown"-Wert des Geräts ist).
+#: Laut Gerätebeschreibung übliche Skalierung (alle vier Exponenten 0).
 DEFAULT_BATTERY_SCALE_FACTORS = BatteryScaleFactors()
 
 #: Rohwert für den "wellknown" Scalefaktor -2 von Register 40052, solange der
@@ -633,7 +631,7 @@ def decode_low_blocks(low1: Sequence[int], low2: Sequence[int]) -> DecodedLowBlo
 
 def decode_high_block(
     high: Sequence[int],
-    scale_factors: BatteryScaleFactors,
+    scale_factors: BatteryScaleFactors | None,
     *,
     meter_positive_import: bool = False,
 ) -> DecodedHighBlock:
@@ -646,9 +644,8 @@ def decode_high_block(
     ``scale_factors`` kommt aus dem separaten LOW2-Teilblock: die vier
     Battery-Faktoren werden nur alle READ_BLOCK_EXT_LOW_INTERVAL Sekunden
     gelesen und liegen deshalb gar nicht in ``high`` (siehe
-    anforderung.yaml, REQ-LOW-INTERVAL-REGISTERS). Der Aufrufer entscheidet,
-    ob er dabei die zuletzt erfolgreich gelesenen oder die Vorgabewerte
-    übergibt.
+    anforderung.yaml, REQ-LOW-INTERVAL-REGISTERS). Bis zum ersten
+    erfolgreichen LOW-Read bleiben die davon abhängigen Messwerte unbekannt.
     """
     reg = _block_reader(high, READ_BLOCK_EXT_START, READ_BLOCK_EXT_COUNT, "HIGH-Block")
     values: dict[str, Any] = {}
@@ -660,6 +657,9 @@ def decode_high_block(
                 if field.scale_factor_address is not None:
                     scale_factor_address = field.scale_factor_address
                     scale_factor_raw = reg(scale_factor_address)
+                elif scale_factors is None:
+                    values[field.key] = None
+                    continue
                 else:
                     scale_factor_address = _BATTERY_SCALE_FACTOR_ADDRESSES[
                         field.battery_scale_factor

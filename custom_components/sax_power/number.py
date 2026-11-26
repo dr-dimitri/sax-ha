@@ -17,6 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
     CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    CONF_BRIDGE_CHARGE_SOC_BUFFER,
     DATA_COORDINATOR,
     DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_HOURS,
@@ -71,6 +72,7 @@ async def async_setup_entry(
             SaxPowerTimedChargeMaxSocNumber(coordinator, entry.entry_id),
             SaxPowerTimedChargeMinSocNumber(coordinator, entry.entry_id),
             SaxPowerBridgeChargeMinEnergyNumber(coordinator, entry.entry_id),
+            SaxPowerBridgeChargeSocBufferNumber(coordinator, entry.entry_id),
             SaxPowerGridServingForecastThresholdNumber(coordinator, entry.entry_id),
             SaxPowerPriceLimitNumber(coordinator, entry.entry_id),
             SaxPowerPriceNeutralPriceNumber(coordinator, entry.entry_id),
@@ -227,8 +229,9 @@ class SaxPowerBridgeChargeMinEnergyNumber(SaxPowerConfigEntity, NumberEntity):
     """Share the minimum stored energy per bridge charge with the options flow."""
 
     _attr_translation_key = CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH
+    _attr_extra_state_attributes = {"min_positive": MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH}
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_native_min_value = MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH
+    _attr_native_min_value = 0
     _attr_native_max_value = MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH
     _attr_native_step = BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -244,6 +247,32 @@ class SaxPowerBridgeChargeMinEnergyNumber(SaxPowerConfigEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_bridge_charge_min_energy_kwh(value)
+        self.async_write_ha_state()
+
+
+class SaxPowerBridgeChargeSocBufferNumber(SaxPowerConfigEntity, NumberEntity):
+    """SOC reserve to retain until PV production resumes."""
+
+    _attr_translation_key = CONF_BRIDGE_CHARGE_SOC_BUFFER
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_native_min_value = MIN_SOC
+    _attr_native_max_value = MAX_SOC
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator: SaxPowerCoordinator, entry_id: str) -> None:
+        super().__init__(coordinator, entry_id)
+        self._assign_ids("number", CONF_BRIDGE_CHARGE_SOC_BUFFER)
+
+    @property
+    def native_value(self) -> int:
+        return self.coordinator.bridge_charge_soc_buffer
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_charging_settings(
+            {CONF_BRIDGE_CHARGE_SOC_BUFFER: value}
+        )
         self.async_write_ha_state()
 
 

@@ -507,7 +507,7 @@ test("charge target and start reject crossed drafts and save valid SOC values to
   await expect(target).toHaveValue("0");
 });
 
-test("bridge minimum validates decimals and saves with the SOC limit after retry", async ({
+test("bridge minimum and SOC buffer validate and save together after retry", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -525,10 +525,15 @@ test("bridge minimum validates decimals and saves with the SOC limit after retry
     exact: true,
   });
   const form = minimum.locator("xpath=ancestor::form");
+  const buffer = charging.getByRole("spinbutton", {
+    name: english ? "SOC buffer (%)" : "SOC-Puffer (%)",
+    exact: true,
+  });
+  const bufferForm = buffer.locator("xpath=ancestor::form");
   const summary = charging.locator(".tou-charging-summary");
   const actions = page.locator("#actions");
   const batch =
-    'sax_power.set_charging_settings {"device_id":"demo-device","max_soc":85,"bridge_charge_min_energy_kwh":1.7}';
+    'sax_power.set_charging_settings {"device_id":"demo-device","max_soc":85,"bridge_charge_min_energy_kwh":0,"bridge_charge_soc_buffer":10}';
 
   await expect(minimum).toHaveValue("1");
   await expect(summary).toContainText("1 kWh");
@@ -540,7 +545,12 @@ test("bridge minimum validates decimals and saves with the SOC limit after retry
     await expect(actions).toHaveText("Keine Aktion");
   }
 
-  await typeNumber(minimum, "1.7");
+  await typeNumber(minimum, "0");
+  await typeNumber(buffer, "10.5");
+  await apply.click();
+  await expect(bufferForm.getByRole("alert")).toBeVisible();
+  await expect(actions).toHaveText("Keine Aktion");
+  await typeNumber(buffer, "10");
   await typeNumber(maximum, "85");
   await page.locator("#hold-action").click();
   await page.locator("#failure").click();
@@ -548,21 +558,32 @@ test("bridge minimum validates decimals and saves with the SOC limit after retry
   await expect(actions).toHaveText(`1: ${batch}`);
   await expect(form.getByRole("status")).toBeVisible();
   await expect(minimum).toBeDisabled();
+  await expect(buffer).toBeDisabled();
   await expect(apply).toBeDisabled();
   await expect(summary).toContainText("1 kWh");
   await page.locator("#release-action").click();
   await expect(form.getByRole("alert")).toBeVisible();
-  await expect(minimum).toHaveValue("1.7");
+  await expect(minimum).toHaveValue("0");
+  await expect(buffer).toHaveValue("10");
   await expect(maximum).toHaveValue("85");
   await expect(summary).toContainText("1 kWh");
 
   await apply.click();
   await expect(actions).toHaveText(`2: ${batch}`);
   await reopenCharging(page);
+  await expect(summary).toContainText(
+    english ? "No minimum charge" : "Keine Mindestlademenge",
+  );
+  await expect(summary).toContainText("10 %");
+  await expect(buffer).toHaveValue("10");
+  await typeNumber(minimum, "1.7");
+  await apply.click();
+  await reopenCharging(page);
   await expect(summary).toContainText(english ? "1.7 kWh" : "1,7 kWh");
   await expect(minimum).toHaveValue("1.7");
   await expect(maximum).toHaveValue("85");
   await charging.locator('button[data-method="fixed"]').click();
   await expect(minimum).toHaveCount(0);
+  await expect(buffer).toHaveCount(0);
   await expect(summary).not.toContainText("kWh");
 });

@@ -67,6 +67,11 @@ const text = computed(() =>
         fixedTarget: "Netzladeziel (%)",
         bridgeTarget: "Maximales Netzladeziel (%)",
         minimumEnergy: "Mindestlademenge",
+        noMinimum: "Keine Mindestlademenge",
+        minimumHint: "0 kWh für reine Bedarfsladung oder mindestens 0,5 kWh.",
+        socBuffer: "SOC-Puffer",
+        bufferHint:
+          "Akkustand, der bis zum PV-Start möglichst erhalten bleiben soll.",
         pvRequired: "PV-Prognose fehlt · unter „Preise & Zeiten“ ergänzen.",
         months: "Aktive Monate",
         allYear: "Ganzjährig",
@@ -95,6 +100,11 @@ const text = computed(() =>
         fixedTarget: "Grid charge target (%)",
         bridgeTarget: "Maximum grid charge target (%)",
         minimumEnergy: "Minimum charging energy",
+        noMinimum: "No minimum charge",
+        minimumHint:
+          "Enter 0 kWh to charge according to need, or at least 0.5 kWh.",
+        socBuffer: "SOC buffer",
+        bufferHint: "Battery level to preserve until solar production starts.",
         pvRequired: "Solar forecast missing · add it under Prices & times.",
         months: "Active months",
         allYear: "All year",
@@ -146,6 +156,9 @@ const globalLimit = computed(() => dashboard?.entity("number", "max_soc"));
 const minimumEnergy = computed(() =>
   dashboard?.entity("number", "bridge_charge_min_energy_kwh"),
 );
+const socBuffer = computed(() =>
+  dashboard?.entity("number", "bridge_charge_soc_buffer"),
+);
 const numberFields = computed(() => [
   ...(editorMethod.value === "fixed"
     ? [{ key: "timed_charge_min_soc", label: text.value.threshold }]
@@ -167,6 +180,12 @@ const numberFields = computed(() => [
         {
           key: "bridge_charge_min_energy_kwh",
           label: `${text.value.minimumEnergy} (kWh)`,
+          hint: text.value.minimumHint,
+        },
+        {
+          key: "bridge_charge_soc_buffer",
+          label: `${text.value.socBuffer} (%)`,
+          hint: text.value.bufferHint,
         },
       ]
     : []),
@@ -256,7 +275,19 @@ async function choose(method: Method): Promise<void> {
           <dd>
             {{
               minimumEnergy?.available
-                ? minimumEnergy.displayValue
+                ? finiteValue(minimumEnergy.state?.state) === 0
+                  ? text.noMinimum
+                  : minimumEnergy.displayValue
+                : text.valueUnavailable
+            }}
+          </dd>
+        </div>
+        <div>
+          <dt>{{ text.socBuffer }}</dt>
+          <dd>
+            {{
+              socBuffer?.available
+                ? socBuffer.displayValue
                 : text.valueUnavailable
             }}
           </dd>

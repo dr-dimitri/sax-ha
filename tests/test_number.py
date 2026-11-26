@@ -19,6 +19,7 @@ from homeassistant.core import HomeAssistant, State
 
 from custom_components.sax_power.const import (
     CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    CONF_BRIDGE_CHARGE_SOC_BUFFER,
     DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     DEFAULT_GRID_SERVING_FORECAST_THRESHOLD_KWH,
     DEFAULT_PRICE_HOURS,
@@ -37,6 +38,7 @@ from custom_components.sax_power.const import (
 from custom_components.sax_power.coordinator import SaxPowerCoordinator
 from custom_components.sax_power.number import (
     SaxPowerBridgeChargeMinEnergyNumber,
+    SaxPowerBridgeChargeSocBufferNumber,
     SaxPowerGridServingForecastThresholdNumber,
     SaxPowerMaxSocNumber,
     SaxPowerPriceChargeHoursNumber,
@@ -146,7 +148,8 @@ async def test_bridge_minimum_number_accepts_and_persists_without_waiting_for_de
     assert entity.available
     assert entity.native_value == DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH
     assert entity.native_unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
-    assert entity.native_min_value == 0.5
+    assert entity.native_min_value == 0
+    assert entity.extra_state_attributes["min_positive"] == 0.5
     assert entity.native_max_value == 100
     assert entity.native_step == 0.1
     assert entity.entity_category is EntityCategory.CONFIG
@@ -157,6 +160,23 @@ async def test_bridge_minimum_number_accepts_and_persists_without_waiting_for_de
         assert entity.native_value == 0.7
         assert entry.options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] == 0.7
         entity.async_write_ha_state.assert_called_once_with()
+        await asyncio.wait_for(entity.async_set_native_value(0), timeout=1)
+        assert (
+            entity.native_value == entry.options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] == 0
+        )
+
+        buffer = SaxPowerBridgeChargeSocBufferNumber(coordinator, entry.entry_id)
+        _prepare_entity(buffer, hass, buffer.entity_id, None)
+        assert buffer.native_value == 0
+        assert (
+            buffer.native_min_value,
+            buffer.native_max_value,
+            buffer.native_step,
+        ) == (0, 100, 1)
+        assert buffer.native_unit_of_measurement == "%"
+        await asyncio.wait_for(buffer.async_set_native_value(10), timeout=1)
+        assert buffer.native_value == entry.options[CONF_BRIDGE_CHARGE_SOC_BUFFER] == 10
+        buffer.async_write_ha_state.assert_called_once_with()
 
 
 async def test_timed_charge_min_soc_seeds_to_default_on_fresh_install(

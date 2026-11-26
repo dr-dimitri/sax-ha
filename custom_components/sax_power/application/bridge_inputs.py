@@ -10,9 +10,13 @@ from datetime import time as dt_time
 from ..const import (
     BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
     CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    CONF_BRIDGE_CHARGE_SOC_BUFFER,
     DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    DEFAULT_BRIDGE_CHARGE_SOC_BUFFER,
     MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    MAX_SOC,
     MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    MIN_SOC,
 )
 from ..domain.bridge_charge import ChargeWindow
 from ..domain.tariff import (
@@ -30,9 +34,12 @@ def require_bridge_charge_min_energy_kwh(value: object) -> float:
     if (
         isinstance(value, bool)
         or not isinstance(value, int | float)
-        or not MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH
-        <= value
-        <= MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH
+        or (
+            value != 0
+            and not MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH
+            <= value
+            <= MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH
+        )
         or not math.isclose(
             value / BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
             round(value / BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH),
@@ -40,7 +47,9 @@ def require_bridge_charge_min_energy_kwh(value: object) -> float:
             abs_tol=1e-9,
         )
     ):
-        raise ValueError("Ungültige Mindestlademenge für die Netzladung")
+        raise ValueError(
+            "Erlaubt sind 0 oder 0,5 bis 100 kWh in Schritten von 0,1 kWh."
+        )
     return round(float(value), 1)
 
 
@@ -53,6 +62,27 @@ def bridge_charge_min_energy_kwh_from_options(options: Mapping[str, object]) -> 
         return require_bridge_charge_min_energy_kwh(value)
     except ValueError:
         return DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH
+
+
+def require_bridge_charge_soc_buffer(value: object) -> int:
+    """Validate the absolute SOC reserve before accepting a software setting."""
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not MIN_SOC <= value <= MAX_SOC
+        or int(value) != value
+    ):
+        raise ValueError("Der SOC-Puffer muss eine ganze Zahl von 0 bis 100 sein.")
+    return int(value)
+
+
+def bridge_charge_soc_buffer_from_options(options: Mapping[str, object]) -> int:
+    try:
+        return require_bridge_charge_soc_buffer(
+            options.get(CONF_BRIDGE_CHARGE_SOC_BUFFER, DEFAULT_BRIDGE_CHARGE_SOC_BUFFER)
+        )
+    except ValueError:
+        return DEFAULT_BRIDGE_CHARGE_SOC_BUFFER
 
 
 def _aware(value: object) -> bool:

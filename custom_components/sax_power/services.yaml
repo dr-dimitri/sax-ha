@@ -114,13 +114,23 @@ set_charging_settings:
           mode: box
     bridge_charge_min_energy_kwh:
       name: Mindestladung
-      description: Mindestmenge für „Nur Bedarf bis Solarstrom“.
+      description: 0 kWh schaltet die Mindestmenge aus. Eine positive Mindestmenge beträgt 0,5 bis 100 kWh.
       selector:
         number:
-          min: 0.5
+          min: 0
           max: 100
           step: 0.1
           unit_of_measurement: kWh
+          mode: box
+    bridge_charge_soc_buffer:
+      name: SOC-Puffer bis Solarstrom
+      description: Gewünschter Akkustand bis zum PV-Start.
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
           mode: box
     price_charge_max_price:
       name: Netzbezug und Laden bis

@@ -19,6 +19,7 @@ from custom_components.sax_power.application.timed_discharge import TimedDischar
 from custom_components.sax_power.const import (
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    CONF_BRIDGE_CHARGE_SOC_BUFFER,
     DATA_COORDINATOR,
     DOMAIN,
     MIN_SETPOINT_POWER,
@@ -143,21 +144,37 @@ async def test_planned_charge_replaces_min_soc_trigger_and_survives_forecast_res
     )
 
 
+@pytest.mark.parametrize(
+    ("initial_soc", "soc_buffer", "minimum_kwh", "minutes"),
+    [(15, 0, 1, 30), (25, 20, 0, 10)],
+)
 async def test_buffered_bridge_plan_starts_writing_at_published_start(
     coordinator: SaxPowerCoordinator,
+    initial_soc: int,
+    soc_buffer: int,
+    minimum_kwh: int,
+    minutes: int,
 ) -> None:
-    """REQ-BRIDGE-CHARGE: One kWh takes 30 minutes at 2 kW."""
+    """REQ-BRIDGE-CHARGE: Report and execute the same reserve-based charge."""
+    coordinator.options = {
+        **coordinator.options,
+        CONF_BRIDGE_CHARGE_SOC_BUFFER: soc_buffer,
+        CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: minimum_kwh,
+    }
     coordinator.async_start_sun_charge = (
         SaxPowerCoordinator.async_start_sun_charge.__get__(coordinator)
     )
     start = NOW + timedelta(minutes=20)
-    end = start + timedelta(minutes=30)
+    end = start + timedelta(minutes=minutes)
     for when in (NOW, start - timedelta(seconds=1), start):
-        soc = 15 - (when - NOW) / timedelta(minutes=6)
+        soc = initial_soc - (when - NOW) / timedelta(minutes=6)
         await _evaluate(coordinator, when, _data(when, soc=soc))
         attributes = coordinator.data["bridge_charge_plan_attributes"]
         assert attributes["charge_start"] == start.isoformat()
         assert attributes["charge_end"] == end.isoformat()
+        assert attributes["charge_energy_kwh"] == pytest.approx(2 * minutes / 60)
+        assert attributes["soc_buffer"] == soc_buffer
+        assert attributes["minimum_charge_energy_kwh"] == minimum_kwh
         if when < start:
             assert coordinator.data["bridge_charge_plan"] == "planned"
             coordinator.async_write_extended_register.assert_not_awaited()
@@ -753,8 +770,20 @@ async def test_new_deadline_replaces_sleeping_legacy_writer(
     "delayed_register", [REG_SUN_IC_CONTROL_MODE, REG_SUN_IC_POWER_SETPOINT_PCT]
 )
 @pytest.mark.parametrize("via_options", [False, True])
-async def test_minimum_change_revokes_write_during_either_ack(
-    coordinator: SaxPowerCoordinator, delayed_register: int, via_options: bool
+@pytest.mark.parametrize(
+    ("key", "value", "energy_wh"),
+    [
+        (CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH, 1.4, 1400),
+        (CONF_BRIDGE_CHARGE_SOC_BUFFER, 20, 4000 / 3),
+    ],
+)
+async def test_bridge_setting_change_revokes_write_during_either_ack(
+    coordinator: SaxPowerCoordinator,
+    delayed_register: int,
+    via_options: bool,
+    key: str,
+    value: float,
+    energy_wh: float,
 ) -> None:
     """REQ-BRIDGE-CHARGE: A reply cannot restore an older minimum."""
     await _evaluate(coordinator, NOW, _data(NOW))
@@ -802,15 +831,15 @@ async def test_minimum_change_revokes_write_during_either_ack(
                         entry,
                         options={
                             **entry.options,
-                            CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: 1.4,
+                            key: value,
                         },
                     )
                     await asyncio.wait_for(dashboard_sync_started.wait(), 1)
                 else:
                     await asyncio.wait_for(
-                        coordinator.async_set_bridge_charge_min_energy_kwh(1.4), 1
+                        coordinator.async_set_charging_settings({key: value}), 1
                     )
-                assert coordinator.bridge_charge_min_energy_kwh == 1.4
+                assert coordinator.options[key] == entry.options[key] == value
                 assert coordinator._bridge_session.plan is None
                 revision = coordinator._tariff_source_revision
                 with pytest.raises(HomeAssistantError):
@@ -832,7 +861,7 @@ async def test_minimum_change_revokes_write_during_either_ack(
     assert len(calls) == (2 if delayed_register == REG_SUN_IC_CONTROL_MODE else 3)
     assert coordinator._tariff_control_revision == revision
     assert coordinator._bridge_session.plan is not None
-    assert coordinator._bridge_session.plan.charge_energy_wh == pytest.approx(1400)
+    assert coordinator._bridge_session.plan.charge_energy_wh == pytest.approx(energy_wh)
 
 
 async def test_deadline_expiring_during_mode_ack_rolls_back_without_setpoint(
@@ -1317,11 +1346,20 @@ async def test_completed_charge_returns_to_current_status_without_old_eta(
     assert "post_charge_status" not in data["bridge_charge_plan_attributes"]
 
 
-@pytest.mark.parametrize("soc,expected", [(20, "not_needed"), (15, "needed")])
+@pytest.mark.parametrize(
+    "soc,buffer,expected",
+    [
+        (20, 0, "not_needed"),
+        (15, 0, "needed"),
+        (20, 15, "needed"),
+        (25, 15, "not_needed"),
+    ],
+)
 async def test_post_charge_display_uses_live_energy_and_preserves_historical_verdict(
-    coordinator: SaxPowerCoordinator, soc: float, expected: str
+    coordinator: SaxPowerCoordinator, soc: float, buffer: int, expected: str
 ) -> None:
     """REQ-VUE-ELECTRICITY-TARIFF: the archive cannot supply a green all-clear."""
+    coordinator.options = {**coordinator.options, CONF_BRIDGE_CHARGE_SOC_BUFFER: buffer}
     session = coordinator._bridge_session
     session.completed_at = NOW
     session.status = "complete"

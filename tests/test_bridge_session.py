@@ -165,6 +165,32 @@ def test_actual_energy_shortfall_is_reported_when_deadline_expires() -> None:
     assert session.attributes["shortfall_kwh"] == pytest.approx(1.2)
 
 
+def test_zero_minimum_stops_on_time_and_assesses_the_frozen_buffer() -> None:
+    session = _started(soc_buffer=20, minimum_charge_energy_wh=0)
+    assert session.plan is not None and session.plan.end is not None
+    assert session.plan.end == NOW + timedelta(hours=2)
+    assert session.attributes["charge_energy_kwh"] == 4
+    # At 40% the battery could cover the remaining 3 kWh down to its 10%
+    # physical floor, but only 2 kWh are available above the desired 20%.
+    session.wait_for_data(session.plan.end, "pv_start_missing", data=None)
+    assert not session.started
+    assert session.attributes["shortfall_kwh"] is None
+    session.wait_for_data(session.plan.end, None, data=BATTERY | {"battery_soc": 40})
+    assert session.status == "insufficient"
+    assert session.attributes["shortfall_kwh"] == pytest.approx(1)
+
+
+def test_zero_minimum_never_extends_a_charge_after_soc_drops() -> None:
+    session = _started(
+        data={"battery_soc": 14}, soc_buffer=20, minimum_charge_energy_wh=0
+    )
+    assert session.plan is not None and session.plan.end is not None
+    assert session.plan.end < session.plan.latest_end
+    assert session.deadline_at(session.plan.end, BATTERY) == session.plan.end
+    assert not _prepare(session, now=session.plan.end, observation={}, data=BATTERY)
+    assert session.completed_at == session.plan.end
+
+
 @pytest.mark.parametrize(
     ("minimum_wh", "minimum_soc"), [(None, 20), (500, 15), (1500, 25)]
 )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from typing import Any
 
 import voluptuous as vol
@@ -15,7 +16,13 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.const import CONF_HOST, CONF_PORT, CURRENCY_EURO, UnitOfEnergy
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PORT,
+    CURRENCY_EURO,
+    PERCENTAGE,
+    UnitOfEnergy,
+)
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
 from homeassistant.helpers import config_validation as cv
@@ -28,7 +35,9 @@ from pymodbus.exceptions import ModbusException
 from . import modbus_connection_settings
 from .application.bridge_inputs import (
     bridge_charge_min_energy_kwh_from_options,
+    bridge_charge_soc_buffer_from_options,
     require_bridge_charge_min_energy_kwh,
+    require_bridge_charge_soc_buffer,
 )
 from .application.economics import parse_price
 from .application.tariff_profiles import tariff_profiles_from_options
@@ -36,8 +45,10 @@ from .binary_sensor import BINARY_SENSOR_DESCRIPTIONS
 from .const import (
     ALL_MONTHS,
     BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
+    BRIDGE_CHARGE_SETTING_KEYS,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    CONF_BRIDGE_CHARGE_SOC_BUFFER,
     CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
@@ -60,7 +71,6 @@ from .const import (
     CONF_TIMED_CHARGE_START,
     CONF_VUE_DASHBOARD_DISMISSED_VERSION,
     CONF_VUE_DASHBOARD_VERSION,
-    DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     DEFAULT_PORT,
     DEFAULT_PRICE_UNIT,
     DEFAULT_PV_FORECAST_FACTOR,
@@ -83,7 +93,6 @@ from .const import (
     MAX_ECONOMICS_PRIOR_RESULT,
     MAX_PV_FORECAST_FACTOR,
     MAX_SOC,
-    MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     MIN_ECONOMICS_FEED_IN_PRICE,
     MIN_ECONOMICS_IMPORT_PRICE,
     MIN_ECONOMICS_INVESTMENT_COST,
@@ -112,7 +121,7 @@ _MAC_UNIQUE_ID_PATTERN = re.compile(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}")
 # dagegen eine feste, hier nachgeführte Anzahl an - siehe die jeweiligen
 # async_setup_entry-Funktionen.
 _ENTITY_COUNT_SENSOR_FIXED = 2  # SaxPowerEnergySensor: geladen/entladen
-_ENTITY_COUNT_NUMBER = 8
+_ENTITY_COUNT_NUMBER = 9
 _ENTITY_COUNT_SELECT = 1
 _ENTITY_COUNT_TIME = 4
 _ENTITY_COUNT_SWITCH_FIXED = 5
@@ -536,12 +545,18 @@ class SaxPowerConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
-class _BridgeMinEnergySelector(selector.NumberSelector):
+class _BridgeNumberSelector(selector.NumberSelector):
     """Validate before the base selector can coerce the submitted number."""
+
+    def __init__(
+        self, config: selector.NumberSelectorConfig, validate: Callable[[object], float]
+    ) -> None:
+        super().__init__(config)
+        self._validate = validate
 
     def __call__(self, data: Any) -> float:
         try:
-            return require_bridge_charge_min_energy_kwh(data)
+            return self._validate(data)
         except ValueError as err:
             raise vol.Invalid(str(err)) from err
 
@@ -570,14 +585,25 @@ STEP_OPTIONS_SCHEMA = vol.Schema(
             selector.EntitySelectorConfig(domain="sensor")
         ),
         vol.Optional(CONF_BRIDGE_CHARGE_ENABLED, default=False): cv.boolean,
-        vol.Optional(CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH): _BridgeMinEnergySelector(
+        vol.Optional(CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH): _BridgeNumberSelector(
             selector.NumberSelectorConfig(
-                min=MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+                min=0,
                 max=MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH,
                 step=BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
                 mode=selector.NumberSelectorMode.BOX,
                 unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-            )
+            ),
+            require_bridge_charge_min_energy_kwh,
+        ),
+        vol.Optional(CONF_BRIDGE_CHARGE_SOC_BUFFER): _BridgeNumberSelector(
+            selector.NumberSelectorConfig(
+                min=MIN_SOC,
+                max=MAX_SOC,
+                step=1,
+                mode=selector.NumberSelectorMode.BOX,
+                unit_of_measurement=PERCENTAGE,
+            ),
+            require_bridge_charge_soc_buffer,
         ),
         vol.Optional(CONF_GRID_SERVING_PV_FORECAST_SENSOR): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor")
@@ -741,16 +767,21 @@ class SaxPowerOptionsFlow(OptionsFlow):
     #: Auf der ersten Seite abgeschickte Werte, bis der tarifspezifische
     #: Folgeschritt sie vervollständigt (siehe async_step_init).
     _base_options: dict[str, Any]
-    _initial_bridge_min_energy = DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH
+    _initial_bridge_settings: dict[str, float]
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is None:
-            self._initial_bridge_min_energy = bridge_charge_min_energy_kwh_from_options(
-                self.config_entry.options
-            )
+            options = self.config_entry.options
+            minimum_energy = bridge_charge_min_energy_kwh_from_options(options)
+            self._initial_bridge_settings = {
+                CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: minimum_energy,
+                CONF_BRIDGE_CHARGE_SOC_BUFFER: bridge_charge_soc_buffer_from_options(
+                    options
+                ),
+            }
         else:
             tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
             if user_input.get(CONF_BRIDGE_CHARGE_ENABLED) and not user_input.get(
@@ -778,11 +809,9 @@ class SaxPowerOptionsFlow(OptionsFlow):
                 }
                 # Andere Oberflächen können die Option ändern, während der
                 # Dialog offen ist. Nur eine Änderung der Eingabe übernehmen.
-                if (
-                    self._base_options.get(CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH)
-                    == self._initial_bridge_min_energy
-                ):
-                    self._base_options.pop(CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH, None)
+                for key, opening_value in self._initial_bridge_settings.items():
+                    if self._base_options.get(key) == opening_value:
+                        self._base_options.pop(key)
                 history = tariff_profiles_from_options(self.config_entry.options)
                 if any(history.values()):
                     self._base_options[CONF_DASHBOARD_TARIFF_PROFILES] = history
@@ -921,10 +950,11 @@ class SaxPowerOptionsFlow(OptionsFlow):
         )
 
     def _save_options(self, options: dict[str, Any]) -> ConfigFlowResult:
-        key = CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH
-        if key not in options and key in self.config_entry.options:
-            options = {**options, key: self.config_entry.options[key]}
-        return self.async_create_entry(title="", data=options)
+        current = self.config_entry.options
+        preserved = {
+            key: current[key] for key in BRIDGE_CHARGE_SETTING_KEYS if key in current
+        }
+        return self.async_create_entry(title="", data={**preserved, **options})
 
     def _suggested(
         self, schema: vol.Schema, user_input: dict[str, Any] | None = None
@@ -941,7 +971,7 @@ class SaxPowerOptionsFlow(OptionsFlow):
         """
         stored = dict(self.config_entry.options)
         if schema is STEP_OPTIONS_SCHEMA:
-            stored[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] = self._initial_bridge_min_energy
+            stored.update(self._initial_bridge_settings)
         if schema is STEP_ECONOMICS_DYNAMIC_SCHEMA:
             profile = tariff_profiles_from_options(self.config_entry.options)[
                 TariffType.DYNAMIC

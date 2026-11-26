@@ -407,6 +407,12 @@ DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH = 1.0
 MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH = 0.5
 MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH = 100.0
 BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH = 0.1
+CONF_BRIDGE_CHARGE_SOC_BUFFER = "bridge_charge_soc_buffer"
+DEFAULT_BRIDGE_CHARGE_SOC_BUFFER = 0
+BRIDGE_CHARGE_SETTING_KEYS = (
+    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    CONF_BRIDGE_CHARGE_SOC_BUFFER,
+)
 
 SERVICE_START_GRID_CHARGE = "start_grid_charge"
 SERVICE_STOP_GRID_CHARGE = "stop_grid_charge"
@@ -417,7 +423,7 @@ CHARGING_SETTING_KEYS = (
     "max_soc",
     "timed_charge_min_soc",
     "timed_charge_max_soc",
-    CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    *BRIDGE_CHARGE_SETTING_KEYS,
     "price_charge_max_price",
     "price_charge_hours",
     "price_charge_neutral_price",

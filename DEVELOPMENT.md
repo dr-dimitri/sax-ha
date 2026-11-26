@@ -1095,8 +1095,11 @@ weder Home Assistant noch den zeitvariablen Tarif und schreibt keine Register.
 Damit kann eine spätere Tarifquelle dieselbe Berechnung mit eigenen Intervallen
 verwenden. Die bestehende dynamische Preissteuerung ist nicht daran angebunden.
 
-Der Bedarf ergibt sich aus dem Verbrauch bis PV-Start abzüglich der nutzbaren
-Batterieenergie oberhalb der Geräte-SOC-Untergrenze. Während Netzladung wird
+Der Bedarf ergibt sich aus dem Verbrauch bis PV-Start abzüglich der Energie
+oberhalb des höheren Werts aus Geräte-SOC-Untergrenze und absolutem SOC-Puffer.
+Liegt der gemessene SOC unter dem Puffer, erhöht die fehlende Reserve den Bedarf.
+Ladeziel und freier Platz verwenden den tatsächlichen SOC. Die Entladeprognose
+zeigt weiter den Zeitpunkt der physischen Geräteuntergrenze. Während Netzladung wird
 Hausverbrauch aus dem Netz gedeckt. Die Berechnung berücksichtigt den
 Energiezuwachs im Speicher und die in dieser Zeit vermiedene Entladung.
 Bei positivem Bedarf gilt die eingestellte Mindestlademenge als Untergrenze
@@ -1104,12 +1107,16 @@ für den geplanten Energiezuwachs im Speicher. Die Planung verwendet Wh.
 Der freie Platz bis zum effektiven Netzlade-Max-SOC begrenzt diese Mindestmenge.
 Ist der Tarifabschnitt bis zum PV-Start für die gegebenenfalls begrenzte
 Mindestmenge zu kurz, gibt die Domain ihn nicht zum Laden frei.
-Ein Auftrag ist zusammenhängend. Bei gleicher Bedarfsdeckung hat ein Auftrag
-mit voller Mindestlademenge Vorrang. Danach entscheiden der günstigste Tarifabschnitt
+Ein Auftrag ist zusammenhängend. Bei gleicher Bedarfsdeckung bevorzugt die
+Planung einen Start vor dem Unterschreiten des Puffers oder die kürzeste
+Verspätung. Danach haben Aufträge mit voller Mindestlademenge Vorrang.
+Anschließend entscheiden der günstigste Tarifabschnitt
 und bei gleichem Preis der späteste mögliche Start.
 Die Planung zieht den gesamten Ladeblock von dort um bis zu zehn Minuten vor.
 Der Start liegt im Tarifabschnitt und setzt genug freie Kapazität für die
-geplante Lademenge voraus. Das Ziel-SOC folgt aus der Restenergie zu diesem
+geplante Lademenge voraus. Bei gesetztem Puffer nutzt ein Teilauftrag den
+freien Platz beim Erreichen des Puffers oder beim späteren Tarifbeginn.
+Das Ziel-SOC folgt aus der Restenergie zu diesem
 Start und der geplanten Lademenge. Reicht kein Kandidat aus, wählt die Domain
 die größte mögliche Bedarfsdeckung und weist den verbleibenden Fehlbetrag aus.
 Eine Versorgungslücke vor dem Ladestart zählt zum Fehlbetrag.
@@ -1173,12 +1180,14 @@ Es gibt keine zusätzliche Startzeit-Entity,
 manuelle PV-Uhrzeit oder Ableitung aus der Tagesenergiesumme. Fehlende oder
 ungültige Prognosedaten geben keine geplante Netzladung frei.
 
-Die Number-Entity `bridge_charge_min_energy_kwh` und der Optionsdialog nutzen
-dieselbe Config-Entry-Option für die Mindestlademenge. Für Bestandsinstallationen gilt ohne Eintrag
-weiter 1,0 kWh. Zulässig sind 0,5 bis 100 kWh in 0,1-kWh-Schritten. Das Dashboard
-bietet die Eingabe in dieser Betriebsart an und speichert sie gemeinsam mit
+Die Number-Entities `bridge_charge_min_energy_kwh` und `bridge_charge_soc_buffer`
+teilen ihre Config-Entry-Optionen mit dem Optionsdialog. Ohne gespeicherten
+Wert gelten 1,0 kWh und 0 % Puffer. Eine Mindestlademenge von 0 kWh deaktiviert
+die Untergrenze und die Verlängerung am geplanten Ende. Positive Mindestmengen
+liegen bei 0,5 bis 100 kWh in 0,1-kWh-Schritten, der Puffer bei 0 bis 100 % in
+ganzen Prozentpunkten. Das Dashboard speichert beide Eingaben gemeinsam mit
 den SOC-Werten über `set_charging_settings`. Alle Felder werden vor der Annahme
-validiert. Eine Änderung der wirksamen Mindestmenge entwertet den gebundenen
+validiert. Eine Änderung der Mindestmenge oder des Puffers entwertet den gebundenen
 Plan und widerruft die Freigabe für laufende Modbus-Befehle. Der vorhandene
 Worker gleicht das Gerät nach der Bestätigung der Softwarewerte ab.
 `SaxPowerBridgeChargeSwitch` stellt `bridge_charge_enabled` als Schalter

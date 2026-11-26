@@ -22,8 +22,10 @@ from pymodbus.exceptions import ModbusException
 
 from .application.bridge_inputs import (
     bridge_charge_min_energy_kwh_from_options,
+    bridge_charge_soc_buffer_from_options,
     charge_windows,
     require_bridge_charge_min_energy_kwh,
+    require_bridge_charge_soc_buffer,
 )
 from .application.bridge_session import BridgeChargeSession
 from .application.calibration import (
@@ -61,6 +63,7 @@ from .application.timed_discharge import (
 from .const import (
     ALL_MONTHS,
     BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
+    BRIDGE_CHARGE_SETTING_KEYS,
     CELL_CALIBRATION_INTERVAL,
     CHARGE_CONFLICT_ISSUES,
     CONF_BRIDGE_CHARGE_ENABLED,
@@ -853,6 +856,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["bridge_charge_plan"] = self._bridge_session.status
         data["bridge_charge_plan_attributes"] = dict(self._bridge_session.attributes)
         data["bridge_charge_plan_attributes"]["enabled"] = self.bridge_charge_enabled
+        if self.bridge_charge_enabled:
+            data["bridge_charge_plan_attributes"].update(
+                minimum_charge_energy_kwh=self.bridge_charge_min_energy_kwh,
+                soc_buffer=self.bridge_charge_soc_buffer,
+            )
         self._publish_charge_progress(data)
 
     def _publish_charge_progress(self, data: dict[str, Any]) -> None:
@@ -950,6 +958,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 min_soc=measurements.get("battery_soc_min"),
                 average_discharge_w=average,
                 until_pv_seconds=(pv_start - now).total_seconds(),
+                soc_buffer=self.bridge_charge_soc_buffer,
             )
             if status != "unknown":
                 # A worker may publish an older coordinator snapshot after a
@@ -985,6 +994,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     @property
     def bridge_charge_min_energy_kwh(self) -> float:
         return bridge_charge_min_energy_kwh_from_options(self.options)
+
+    @property
+    def bridge_charge_soc_buffer(self) -> int:
+        return bridge_charge_soc_buffer_from_options(self.options)
 
     async def async_set_bridge_charge_min_energy_kwh(
         self, value: float, *, defer_device_update: bool = True
@@ -1073,6 +1086,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             frozenset(self._timed_charge_months),
             self.effective_timed_charge_max_soc,
             self.bridge_charge_min_energy_kwh,
+            self.bridge_charge_soc_buffer,
             self.tariff_provider.config,
             self.price_planner.pv_forecast_entity_id,
         )
@@ -1169,6 +1183,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             windows=windows,
             fingerprint=fingerprint,
             minimum_charge_energy_wh=round(self.bridge_charge_min_energy_kwh * 1000),
+            soc_buffer=self.bridge_charge_soc_buffer,
         )
 
     def _update_discharge_forecast(self, data: dict[str, Any]) -> None:
@@ -3817,12 +3832,16 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Accept one validated dashboard draft before scheduling device work."""
         self._raise_if_shutdown()
         validated = self._validate_charging_settings(values)
-        minimum_energy = validated.pop(CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH, None)
+        bridge_settings = {
+            key: validated.pop(key)
+            for key in BRIDGE_CHARGE_SETTING_KEYS
+            if key in validated
+        }
         self._apply_charging_settings(validated)
-        if minimum_energy is not None:
+        if bridge_settings:
             entry = self.hass.config_entries.async_get_entry(self.entry_id)
             options = dict(entry.options if entry is not None else self.options)
-            options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] = minimum_energy
+            options.update(bridge_settings)
             if self.options != options:
                 self._apply_tariff_options(options)
             if entry is not None and entry.options != options:
@@ -3846,18 +3865,27 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         validated: dict[str, int | float] = {}
         for key, value in values.items():
-            if key == CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH and fixed_time_selected is None:
+            if key in BRIDGE_CHARGE_SETTING_KEYS and fixed_time_selected is None:
                 try:
-                    validated[key] = require_bridge_charge_min_energy_kwh(value)
+                    if key == CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH:
+                        minimum, maximum, step = (
+                            MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+                            MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+                            BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
+                        )
+                        validated[key] = require_bridge_charge_min_energy_kwh(value)
+                    else:
+                        minimum, maximum, step = MIN_SOC, MAX_SOC, 1
+                        validated[key] = require_bridge_charge_soc_buffer(value)
                 except ValueError as err:
                     raise ServiceValidationError(
                         translation_domain=DOMAIN,
                         translation_key="invalid_charging_setting",
                         translation_placeholders={
                             "field": key,
-                            "min": str(MIN_BRIDGE_CHARGE_MIN_ENERGY_KWH),
-                            "max": str(MAX_BRIDGE_CHARGE_MIN_ENERGY_KWH),
-                            "step": str(BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH),
+                            "min": str(minimum),
+                            "max": str(maximum),
+                            "step": str(step),
                         },
                     ) from err
                 continue
@@ -4717,10 +4745,11 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         previous_tariff_type = self.tariff_provider.config.tariff_type
         previous_enabled = self._timed_charge_enabled, self._price_charge_enabled
         source_changed = self._tariff_sources_changed(options)
-        bridge_writer_superseded = (
-            self._bridge_charge_deadline is not None
-            and self.bridge_charge_min_energy_kwh
+        bridge_writer_superseded = self._bridge_charge_deadline is not None and (
+            self.bridge_charge_min_energy_kwh
             != bridge_charge_min_energy_kwh_from_options(options)
+            or self.bridge_charge_soc_buffer
+            != bridge_charge_soc_buffer_from_options(options)
         )
         self.options = dict(options)
         if source_changed:
@@ -4760,7 +4789,7 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _tariff_sources_changed(self, options: dict[str, Any]) -> bool:
         ignored = {
-            CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+            *BRIDGE_CHARGE_SETTING_KEYS,
             CONF_DASHBOARD_TARIFF_PROFILES,
             CONF_VUE_DASHBOARD_ENABLED,
         }

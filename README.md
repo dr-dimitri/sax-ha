@@ -364,11 +364,17 @@ zum Entfernen schaltest du zuerst die verbrauchsbasierte Ladeplanung aus.
 Ein abgelehnter Speicherversuch erhält deine Eingaben und die bisherigen Werte.
 **Netzladung aktiv** muss ebenfalls eingeschaltet sein. Die ausgewählten
 Monate gelten weiterhin. Die Planung berechnet aus dem Verbrauch der letzten
-1 bis 15 Minuten, ob der Speicher bis zum erwarteten PV-Start reicht. Fehlt
-Energie, plant sie mindestens die unter **Mindestladung (kWh)** eingestellte
-Energiemenge für den Speicher ein. Du findest den Wert neben dem maximalen
-Netzladeziel. Er ist in **0,1-kWh-Schritten** von **0,5 bis 100 kWh** einstellbar
-und steht standardmäßig auf **1,0 kWh**.
+1 bis 15 Minuten, wie viel Energie bis zum erwarteten PV-Start fehlt.
+Unter **Mindestlademenge (kWh)** bedeutet **0 kWh**, dass die Netzladung genau
+nach diesem Bedarf geplant wird. Für eine feste Mindestmenge kannst du **0,5 bis
+100 kWh** in **0,1-kWh-Schritten** einstellen. Voreingestellt ist **1,0 kWh**.
+
+Der **SOC-Puffer (%)** gibt an, welchen Akkustand du bis zum PV-Start möglichst
+behalten möchtest. Stellst du **10 %** ein und der SOC würde bis dahin auf
+**6 %** sinken, plant die Integration eine Netzladung im günstigen Tarif. Sie
+richtet den Start am erwarteten Erreichen der 10 % aus. Liegt der Akkustand
+bereits darunter, berücksichtigt sie auch die Energie zum Auffüllen des Puffers.
+Voreingestellt sind **0 %**. Die Geräte-SOC-Untergrenze gilt immer.
 Lassen **Netzladen Max. SOC** oder die globale Grenze **Max. SOC** weniger Platz,
 begrenzt der verfügbare Platz die Lademenge. Die Bedarfsberechnung ersetzt die
 Startschwelle **Netzladung Min. SOC**.
@@ -394,7 +400,9 @@ Batteriemesswerte startet keine geplante Netzladung.
 
 Die Karte **Ladeplanung** unter **Stromtarif → Netzladung** nennt die beobachteten
 Minuten, den erwarteten Entladezeitpunkt, Ladebeginn und Ladeende sowie den
-PV-Start. Reicht die vorhandene Energie aus, meldet sie ausdrücklich, dass keine
+PV-Start. Sie zeigt die geplante Lademenge, einen eingestellten SOC-Puffer
+und bei 0 kWh den Hinweis **Keine Mindestlademenge**. Reicht die vorhandene
+Energie für Verbrauch und Puffer aus, meldet sie ausdrücklich, dass keine
 Netzladung nötig ist. Reichen Ladefenster oder Speicherkapazität nicht aus, zeigt
 sie den erwarteten Fehlbetrag und gegebenenfalls eine teilweise Aufladung.
 

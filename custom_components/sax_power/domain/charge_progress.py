@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .bridge_charge import energy_above_buffer_wh
+
 
 def _number(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
@@ -77,6 +79,7 @@ def assess_charge_demand(
     min_soc: object,
     average_discharge_w: object,
     until_pv_seconds: object,
+    soc_buffer: float = 0,
 ) -> str:
     """Compare current energy with fresh consumption until the current PV start."""
     capacity = _number(capacity_wh)
@@ -84,19 +87,22 @@ def assess_charge_demand(
     minimum = _number(min_soc)
     average = _number(average_discharge_w)
     horizon = _number(until_pv_seconds)
+    buffer = _number(soc_buffer)
     if (
         capacity is None
         or capacity <= 0
         or current_soc is None
         or minimum is None
         or not 0 <= minimum <= current_soc <= 100
+        or buffer is None
+        or not 0 <= buffer <= 100
         or average is None
         or average <= 0
         or horizon is None
         or horizon <= 0
     ):
         return "unknown"
-    available = capacity * (current_soc - minimum) / 100
+    available = energy_above_buffer_wh(capacity, current_soc, minimum, buffer)
     required = average * horizon / 3600
     if not math.isfinite(available) or not math.isfinite(required):
         return "unknown"

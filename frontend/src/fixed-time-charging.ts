@@ -137,8 +137,6 @@ export function useFixedTimeCharging(dashboard: SaxDashboard | undefined) {
     pending,
     error,
     canConfigure,
-    confirmed,
-    displayStart,
     reset,
     choose,
     edit,

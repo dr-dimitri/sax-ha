@@ -1317,18 +1317,8 @@ async function applyCharging(): Promise<void> {
             {{ text.entityPending }}
           </p>
         </div>
-        <div
-          v-if="fixedTimeEnabled || active === 'dynamic'"
-          class="electricity-charge-status"
-        >
-          <EntityValue
-            domain="sensor"
-            :entity-key="
-              fixedTimeEnabled
-                ? 'timed_charge_active_text'
-                : 'price_charge_status_text'
-            "
-          />
+        <div v-if="fixedTimeEnabled" class="electricity-charge-status">
+          <EntityValue domain="sensor" entity-key="timed_charge_active_text" />
         </div>
         <section
           v-if="known"

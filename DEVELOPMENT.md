@@ -295,10 +295,10 @@ zusammen über den Tarif-WebSocket-Endpunkt angenommen;
 zurück. `fixed_time_charge_enabled` und `fixed_time_charge_start` sind gemeinsame
 Config-Entry-Optionen, unabhängig von den gespeicherten Preisprofilen.
 Bei fester Startzeit bleibt bei beiden Tarifarten `ChargePlan.vue` sichtbar.
-Die Überschrift ergänzt **Netzladen startet ab HH:MM Uhr** in Blau aus der
+Die Überschrift ergänzt **Feste Startzeit HH:MM Uhr** in Blau aus der
 bestätigten Tarifkonfiguration; gespeicherte Sekunden ungleich null bleiben
 erhalten. Entwürfe verändern den Hinweis nicht. Tatsächlich gemessene Ladung
-zeigt weiterhin vorrangig **Ladung läuft...** mit Restdauer. Die ausgeschaltete
+zeigt **Ladung läuft** mit Restdauer und die feste Startzeit darunter. Die ausgeschaltete
 verbrauchsbasierte Planung liefert hier keine Bedarfs- oder Fehlertexte.
 Browserprüfungen in `time-of-use-usability.spec.ts` und `dynamic-tariff.spec.ts`
 sichern Gruppierung, Größen, Tastaturbedienung und Rückmeldungen ab.
@@ -864,18 +864,19 @@ die vorhandenen Verbrauchsangaben für geplante/laufende Ladeaufträge erhalten.
 Die Beobachtungsdauer wird in beiden Textpfaden auf ganze Minuten ohne
 Nachkommastelle gerundet, nachdem der Rohwert auf 1–15 Minuten geprüft wurde.
 Die Messattribute behalten ihre genaue Dauer für die Berechnung.
-Die Überschrift ergänzt den bestätigten Bedarf als **Ladeplanung: Keine
-Ladung nötig** oder **Ladeplanung: Ladung voraussichtlich nötig**. Nur der
-Zusatz hinter dem Doppelpunkt ist grün beziehungsweise blau, in beiden
-HA-Themes; die Aussage bleibt zusätzlich als Text erkennbar. Fehlende oder
-noch nicht bewertete Daten zeigen den orangefarbenen Zusatz **Ladezeitpunkt
-konnte noch nicht errechnet werden**. Bei aktiver automatischer Netzladung mit
-festem Netzladeziel und ausgeschaltetem Verbrauchsplan zeigt die Überschrift
-neutral die bestätigte SOC-Startschwelle im Niedertarif und bei 0 % die
-Bedingung „bei 0 % Akkustand“. Die Entladeprognose bleibt darunter sichtbar.
+Die Überschrift nennt den Bedarf einmal. **Keine Ladung nötig** erscheint
+grün, **Ladung voraussichtlich nötig** blau. Ein noch offener Bedarf und
+fehlende Plandaten erhalten eigene orangefarbene Hinweise. Bei ausgeschaltetem
+Verbrauchsplan zeigt die Karte eine verfügbare Entladeprognose oder eine
+bestätigte Startregel für das feste Netzladeziel. Nur der eingeschaltete
+Verbrauchsmodus nennt fehlende Voraussetzungen. Das Ladefenster und der PV-Start
+teilen sich das Datum, wenn sie am selben lokalen Tag liegen. Bei gemeldeten
+0 % mit Start im Niedertarif entfällt die Reichweitenangabe. Meldet der Plan
+`not_needed`, obwohl die unabhängige Entladeprognose mindestens eine Minute vor dem PV-Start endet, macht
+die Überschrift den Widerspruch sichtbar. Beide Zeiten bleiben ablesbar.
 Pausierte Aufträge benötigen eine erhaltene Bedarfsgrundlage für den blauen
 Zusatz. Eine frisch gemessene, bestätigte Netzladung zeigt stattdessen
-**Ladeplanung: Ladung läuft...** in Blau. Der Hinweis verwendet die zentral
+**Ladeplanung: Ladung läuft** in Blau. Der Hinweis verwendet die zentral
 veröffentlichte Restdauer und aktuelle Ladeleistung. Restminuten werden
 aufgerundet; längere Dauern werden als Stunden und Minuten formatiert.
 Fehlende Schätzwerte bleiben ausdrücklich unbekannt. Laufende Anzeige und

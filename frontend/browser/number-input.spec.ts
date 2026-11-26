@@ -571,9 +571,9 @@ test("bridge minimum and SOC buffer validate and save together after retry", asy
   await apply.click();
   await expect(actions).toHaveText(`2: ${batch}`);
   await reopenCharging(page);
-  await expect(summary).toContainText(
-    english ? "No minimum charge" : "Keine Mindestlademenge",
-  );
+  await expect(
+    summary.getByText(english ? "None" : "Keine", { exact: true }),
+  ).toBeVisible();
   await expect(summary).toContainText("10 %");
   await expect(buffer).toHaveValue("10");
   await typeNumber(minimum, "1.7");

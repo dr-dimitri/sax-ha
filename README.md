@@ -407,13 +407,12 @@ oder die prognostizierte Tagesenergiemenge allein bestimmen den Start nicht.
 Ohne passende PV-Prognose, ausreichenden vorhergesagten Ertrag oder gültige
 Batteriemesswerte startet keine geplante Netzladung.
 
-Die Karte **Ladeplanung** unter **Stromtarif → Netzladung** nennt die beobachteten
-Minuten, den erwarteten Entladezeitpunkt, Ladebeginn und Ladeende sowie den
-PV-Start. Sie zeigt die geplante Lademenge, einen eingestellten SOC-Puffer
-und bei 0 kWh den Hinweis **Keine Mindestlademenge**. Reicht die vorhandene
-Energie für Verbrauch und Puffer aus, meldet sie ausdrücklich, dass keine
-Netzladung nötig ist. Reichen Ladefenster oder Speicherkapazität nicht aus, zeigt
-sie den erwarteten Fehlbetrag und gegebenenfalls eine teilweise Aufladung.
+Unter **Stromtarif → Netzladung** steht der Ladebedarf in der Überschrift
+**Ladeplanung**. Darunter siehst du die Reichweite ohne Netzladung, das geplante
+Ladefenster und den erwarteten PV-Start. Bei einer geplanten Ladung erscheinen
+Lademenge und Ladeziel. Reicht die Energie bis zum PV-Start voraussichtlich
+nicht aus, zeigt die Karte die Fehlmenge und ein verfügbares Teilladefenster.
+Mindestlademenge und SOC-Puffer findest du in den Netzladeeinstellungen darüber.
 
 Die Planung zieht den Ladebeginn um bis zu **zehn Minuten** vor. Ein für
 03:00–04:00 Uhr berechneter Ladeblock beginnt dann um 02:50 Uhr und endet

@@ -356,9 +356,18 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
       expect(
         charging.querySelector(".electricity-master input"),
       ).not.toBeNull();
-      expect(!!charging.querySelector(".electricity-charge-status")).toBe(
-        type === "dynamic",
-      );
+      if (type === "dynamic") {
+        await fixture.update(
+          "price_charge_status_text",
+          "Warte auf Preisfenster",
+        );
+        expect(
+          charging.textContent?.match(/Warte auf Preisfenster/g),
+        ).toHaveLength(1);
+        expect(
+          charging.querySelector(".electricity-plan")?.textContent,
+        ).toContain("Warte auf Preisfenster");
+      }
       expect(charging.querySelector(".electricity-plan")).not.toBeNull();
       await click(prices, "Bearbeiten");
       expect(

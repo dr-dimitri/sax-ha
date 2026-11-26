@@ -47,8 +47,8 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     const heading = charging.locator(".charge-plan h2");
     const expected = (time: string) =>
       english
-        ? `Charging plan: Grid charging starts at ${time}`
-        : `Ladeplanung: Netzladen startet ab ${time} Uhr`;
+        ? `Charging plan: Scheduled start ${time}`
+        : `Ladeplanung: Feste Startzeit ${time} Uhr`;
     await expect(input).toHaveValue("02:00");
     await expect(panel).not.toHaveAttribute("data-tariff-configure-requests");
     await expect(charging.locator(".month-selection")).toBeVisible();
@@ -67,10 +67,8 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     await expect(charging.locator(".electricity-charging-editor")).toHaveCount(
       0,
     );
-    await expect(
-      charging.locator(".fixed-time-charging-summary"),
-    ).toContainText("00:00");
     await expect(heading).toHaveText(expected("00:00"));
+    expect((await charging.innerText()).match(/00:00/g)).toHaveLength(1);
     await expect(
       heading.locator(".charge-plan__demand--fixed-time"),
     ).toBeVisible();
@@ -118,9 +116,6 @@ for (const type of ["time_of_use", "dynamic"] as const) {
         fullPage: true,
       });
     await apply.click();
-    await expect(
-      charging.locator(".fixed-time-charging-summary"),
-    ).toContainText("23:45");
     await expect(heading).toHaveText(expected("23:45"));
     await expect(panel).toHaveAttribute("data-tariff-configure-requests", "2");
     if (testInfo.project.name === "desktop-light-de")
@@ -157,9 +152,7 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     await expect(charging.locator(".electricity-charging-editor")).toHaveCount(
       0,
     );
-    await expect(
-      charging.locator(".fixed-time-charging-summary"),
-    ).toContainText("01:30");
+    await expect(charging.locator(".charge-plan h2")).toContainText("01:30");
     await expect(
       charging.locator(".dynamic-charging-summary, .tou-charging-summary"),
     ).toContainText("40 %");
@@ -189,13 +182,10 @@ for (const type of ["time_of_use", "dynamic"] as const) {
       english,
     );
     await apply.click();
-    await expect(
-      charging.locator(".fixed-time-charging-summary"),
-    ).toContainText("02:00");
     const heading = charging.locator(".charge-plan h2");
     const confirmedHeading = english
-      ? "Charging plan: Grid charging starts at 02:00"
-      : "Ladeplanung: Netzladen startet ab 02:00 Uhr";
+      ? "Charging plan: Scheduled start 02:00"
+      : "Ladeplanung: Feste Startzeit 02:00 Uhr";
     await expect(heading).toHaveText(confirmedHeading);
     await charging
       .locator("header .editor-actions > button:first-child")
@@ -207,9 +197,6 @@ for (const type of ["time_of_use", "dynamic"] as const) {
     await expect(input).toBeDisabled();
     await expect(apply).toBeDisabled();
     await expect(heading).toHaveText(confirmedHeading);
-    await expect(
-      charging.locator(".fixed-time-charging-summary"),
-    ).toContainText("02:00");
     await expect(panel).toHaveAttribute("data-tariff-configure-requests", "2");
     await expect(charging.getByRole("status").first()).toContainText(
       english ? "Applying charging method" : "Ladeweise wird übernommen",
@@ -221,9 +208,6 @@ for (const type of ["time_of_use", "dynamic"] as const) {
       english ? "draft is preserved" : "Entwurf bleibt erhalten",
     );
     await expect(heading).toHaveText(confirmedHeading);
-    await expect(
-      charging.locator(".fixed-time-charging-summary"),
-    ).toContainText("02:00");
     const method = type === "dynamic" ? "relative" : "fixed";
     await charging
       .locator(`[data-strategy="${method}"], [data-method="${method}"]`)

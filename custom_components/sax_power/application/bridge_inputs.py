@@ -29,6 +29,22 @@ from ..domain.tariff import (
 MAX_BRIDGE_HORIZON = timedelta(hours=26)
 
 
+def empty_battery_consumption_power(storage: object, meter: object) -> float | None:
+    """Measure uncovered house demand while an empty battery cannot discharge."""
+    if (
+        not isinstance(storage, int | float)
+        or isinstance(storage, bool)
+        or not isinstance(meter, int | float)
+        or isinstance(meter, bool)
+        or not math.isfinite(storage)
+        or not math.isfinite(meter)
+    ):
+        return None
+    # Charging has a negative sign, so the battery's own grid import
+    # cancels out. Export contributes no uncovered demand.
+    return max(0.0, meter + storage)
+
+
 def require_bridge_charge_min_energy_kwh(value: object) -> float:
     """Validate and normalize the shared tariff-bridge setting."""
     if (

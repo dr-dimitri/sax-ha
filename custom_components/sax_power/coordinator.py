@@ -21,9 +21,11 @@ from homeassistant.util import dt as dt_util
 from pymodbus.exceptions import ModbusException
 
 from .application.bridge_inputs import (
+    MAX_BRIDGE_HORIZON,
     bridge_charge_min_energy_kwh_from_options,
     bridge_charge_soc_buffer_from_options,
     charge_windows,
+    empty_battery_consumption_power,
     require_bridge_charge_min_energy_kwh,
     require_bridge_charge_soc_buffer,
 )
@@ -344,6 +346,20 @@ def _format_window_for_message(
 def _format_kwh(value: float) -> str:
     """Formatiert kWh ohne technisch bedingte Nachkommastellen."""
     return f"{value:.10f}".rstrip("0").rstrip(".")
+
+
+def _consumption_observation(
+    forecast: DischargeForecast, observed_at: datetime
+) -> dict[str, Any]:
+    duration = forecast.observation_seconds
+    average = forecast.average_discharge_w
+    if duration is None or average is None:
+        return {}
+    return {
+        "average_discharge_w": average,
+        "observation_minutes": duration / 60,
+        "observed_at": observed_at.isoformat(),
+    }
 
 
 def _grid_serving_pause_status(
@@ -670,6 +686,10 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._discharge_forecast = DischargeForecast(
             max_sample_gap=READ_BLOCK_EXT_HIGH_MAX_AGE
         )
+        self._empty_battery_consumption = DischargeForecast(
+            max_sample_gap=READ_BLOCK_EXT_HIGH_MAX_AGE
+        )
+        self._empty_battery_observation: dict[str, Any] = {}
         self._discharge_forecast_revision: int | None = None
         self._discharge_forecast_at: datetime | None = None
         self._discharge_forecast_attributes: dict[str, Any] = {}
@@ -798,6 +818,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._energy_last_ts = None
             self._invalidate_grid_energy_sample()
             self._discharge_forecast.reset()
+            self._empty_battery_consumption.reset()
+            self._empty_battery_observation = {}
             self._discharge_forecast_at = None
             self._bridge_session.wait_for_data(dt_util.utcnow(), "measurements_missing")
             self._discharge_forecast_attributes = {}
@@ -854,13 +876,41 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data["price_charge_current_price"] = plan.current_price
         data["next_cell_calibration"] = self.next_cell_calibration_date
         data["bridge_charge_plan"] = self._bridge_session.status
-        data["bridge_charge_plan_attributes"] = dict(self._bridge_session.attributes)
-        data["bridge_charge_plan_attributes"]["enabled"] = self.bridge_charge_enabled
+        attributes = dict(
+            self._bridge_session.attributes, enabled=self.bridge_charge_enabled
+        )
+        data["bridge_charge_plan_attributes"] = attributes
         if self.bridge_charge_enabled:
-            data["bridge_charge_plan_attributes"].update(
+            attributes.update(
                 minimum_charge_energy_kwh=self.bridge_charge_min_energy_kwh,
                 soc_buffer=self.bridge_charge_soc_buffer,
             )
+        elif (
+            data.get("soc") == 0
+            and self._timed_charge_enabled
+            and self.timed_charge_uses_tariff
+            and not self.fixed_time_charge_enabled
+            and not self._price_charge_enabled
+            and not self._basic_read_failed
+            and not self._control_bootstrap_pending
+            and self._extended_available
+            and self._grid_charge_power is None
+            and self._timed_charge_min_soc is not None
+            and self.effective_timed_charge_max_soc > 0
+        ):
+            now = dt_util.now()
+            utc_now = now.astimezone(dt_util.UTC)
+            windows = charge_windows(
+                now=now,
+                pv_start=utc_now + MAX_BRIDGE_HORIZON,
+                active_months=self._timed_charge_months,
+                tariff=self.tariff_provider.config,
+            )
+            if windows:
+                if windows[0].start > utc_now:
+                    attributes["empty_battery_start"] = windows[0].start.isoformat()
+                elif self._timed_charge_active:
+                    attributes["empty_battery_start_due"] = True
         self._publish_charge_progress(data)
 
     def _publish_charge_progress(self, data: dict[str, Any]) -> None:
@@ -1118,6 +1168,8 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             session.finish_at_soc_limit(now, completion_data)
             return False
         observation = data.get("discharge_forecast_attributes") or {}
+        if data["soc"] == 0 and self._empty_battery_observation:
+            observation = self._empty_battery_observation
         retain_observation = session.started or (
             session.completed_at is not None
             and (now < session.completed_at + timedelta(minutes=1) or not observation)
@@ -1195,11 +1247,30 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             or not 0 <= monotonic() - sample_time <= READ_BLOCK_EXT_HIGH_MAX_AGE
         ):
             self._discharge_forecast.reset()
+            self._empty_battery_consumption.reset()
+            self._empty_battery_observation = {}
             self._discharge_forecast_at = None
             self._discharge_forecast_attributes = {}
             self._discharge_forecast_revision = self._high_sample_revision
         elif self._discharge_forecast_revision != self._high_sample_revision:
             self._discharge_forecast_revision = self._high_sample_revision
+            observed_at = dt_util.utcnow()
+            if data.get("soc") == 0 and self.bridge_charge_enabled:
+                self._empty_battery_consumption.update(
+                    time=sample_time,
+                    power=empty_battery_consumption_power(
+                        data.get("storage_power_active"), data.get("smartmeter_power")
+                    ),
+                    capacity_wh=data.get("battery_capacity"),
+                    soc=data.get("battery_soc"),
+                    min_soc=data.get("battery_soc_min"),
+                )
+                self._empty_battery_observation = _consumption_observation(
+                    self._empty_battery_consumption, observed_at
+                )
+            else:
+                self._empty_battery_consumption.reset()
+                self._empty_battery_observation = {}
             seconds = self._discharge_forecast.update(
                 time=sample_time,
                 power=data.get("storage_power_active"),
@@ -1211,7 +1282,6 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._discharge_forecast_attributes = {}
             if seconds is not None and math.isfinite(seconds):
                 try:
-                    observed_at = dt_util.utcnow()
                     self._discharge_forecast_at = observed_at + timedelta(
                         seconds=seconds
                     )
@@ -1219,14 +1289,9 @@ class SaxPowerCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # Very small discharge rates can exceed datetime's range.
                     pass
                 else:
-                    duration = self._discharge_forecast.observation_seconds
-                    average_power = self._discharge_forecast.average_discharge_w
-                    if duration is not None and average_power is not None:
-                        self._discharge_forecast_attributes = {
-                            "average_discharge_w": average_power,
-                            "observation_minutes": duration / 60,
-                            "observed_at": observed_at.isoformat(),
-                        }
+                    self._discharge_forecast_attributes = _consumption_observation(
+                        self._discharge_forecast, observed_at
+                    )
         data["discharge_forecast"] = self._discharge_forecast_at
         data["discharge_forecast_attributes"] = dict(
             self._discharge_forecast_attributes

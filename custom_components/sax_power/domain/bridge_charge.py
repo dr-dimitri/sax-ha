@@ -116,6 +116,7 @@ def plan_bridge_charge(
     windows: Sequence[ChargeWindow],
     minimum_charge_energy_wh: float = DEFAULT_MIN_BRIDGE_CHARGE_ENERGY_WH,
     soc_buffer: float = 0,
+    reported_soc: float | None = None,
 ) -> BridgeChargePlan:
     """Choose a charge and buffer its latest feasible start.
 
@@ -126,8 +127,10 @@ def plan_bridge_charge(
     absolute ``soc_buffer`` through PV start. No discharge lock is assumed.
 
     A charge adds at least ``minimum_charge_energy_wh`` unless the SOC ceiling
-    is reached first. At equal coverage, prefer preserving the SOC buffer,
-    then the full minimum, price and latest start. The SOC ceiling, tariff
+    is reached first. A reported SOC of zero selects the earliest executable
+    window at its opening. The more precise energy measurement ``soc`` can
+    differ from the reported level. Otherwise, at equal coverage, prefer the
+    SOC buffer, full minimum, price and latest start. The SOC ceiling, tariff
     interval and PV start bound every charge.
     """
     unavailable = BridgeChargeStatus.UNAVAILABLE
@@ -139,10 +142,13 @@ def plan_bridge_charge(
         return BridgeChargePlan(unavailable, reason="pv_start_not_future")
     if not _finite(minimum_charge_energy_wh) or minimum_charge_energy_wh < 0:
         return BridgeChargePlan(unavailable, reason="invalid_minimum_charge_energy")
+    if reported_soc is None:
+        reported_soc = soc
     values = (
         average_discharge_w,
         capacity_wh,
         soc,
+        reported_soc,
         min_soc,
         max_soc,
         soc_buffer,
@@ -154,6 +160,7 @@ def plan_bridge_charge(
         and charge_power_w > 0
         and 0 <= min_soc <= max_soc <= 100
         and min_soc <= soc <= 100
+        and 0 <= reported_soc <= 100
         and 0 <= soc_buffer <= 100
     ):
         return BridgeChargePlan(unavailable, reason="invalid_battery_state")
@@ -197,6 +204,7 @@ def plan_bridge_charge(
             missing_energy_wh=0.0,
         )
 
+    start_at_window_open = reported_soc == 0
     duration_needed = required / (power + discharge)
     minimum_duration = minimum_charge_energy_wh / power
     hours_to_buffer = max(above_buffer, 0.0) / discharge if discharge else 0.0
@@ -212,7 +220,10 @@ def plan_bridge_charge(
             maximum / power,
             (discharge * end + maximum - available) / (power + discharge),
         )
-        if reserve:
+        if start_at_window_open:
+            headroom = maximum - max(0.0, available - discharge * start)
+            capacity_limit = min(capacity_limit, headroom / power)
+        elif reserve:
             # Waiting for extra headroom could drain the very reserve this
             # charge should protect. A late tariff opens at the actual SOC.
             energy_at_buffer_start = max(
@@ -241,8 +252,8 @@ def plan_bridge_charge(
         headroom_start = (
             (available - (maximum - charged)) / discharge if discharge else 0.0
         )
-        preferred_start = hours_to_buffer
-        if not reserve and discharge:
+        preferred_start = start if start_at_window_open else hours_to_buffer
+        if not start_at_window_open and not reserve and discharge:
             # Without a reserve, a partial charge can wait until its energy
             # just covers the remaining consumption before PV starts.
             preferred_start = max(
@@ -307,6 +318,7 @@ def plan_bridge_charge(
     return min(
         candidates,
         key=lambda plan: (
+            plan.start if start_at_window_open else now,
             plan.missing_energy_wh,
             (
                 max(0.0, (plan.start - now).total_seconds() - hours_to_buffer * 3600)

@@ -56,7 +56,6 @@ const text = computed(() =>
     ? {
         mode: "Ladeweise",
         fixedTime: "Ab fester Uhrzeit",
-        startTime: "Täglicher Ladestart",
         months: "Aktive Monate",
         global: "Max SOC (%)",
         globalSummary: "Max SOC",
@@ -86,7 +85,6 @@ const text = computed(() =>
     : {
         mode: "Charging method",
         fixedTime: "Start at a fixed time",
-        startTime: "Daily charging start",
         months: "Active months",
         global: "Max SOC (%)",
         globalSummary: "Max SOC",
@@ -217,17 +215,6 @@ async function choose(method: Strategy) {
                   ? text.modes[selected]
                   : text.unavailable
             }}
-          </dd>
-        </div>
-      </dl>
-      <dl
-        v-if="selected === 'fixed_time'"
-        class="electricity-summary-rows fixed-time-charging-summary"
-      >
-        <div>
-          <dt>{{ text.startTime }}</dt>
-          <dd>
-            {{ fixedTime.displayStart(fixedTime.confirmed.value?.start) }}
           </dd>
         </div>
       </dl>

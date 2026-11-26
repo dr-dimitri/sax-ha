@@ -346,9 +346,9 @@ requirement_bridge_charge:
     erwartetem Entladezeitpunkt, Niedertarif-Ladestart, Ladeende und PV-Start
     zusammen. Kein Ladebedarf, fehlende Eingangsdaten, Pause und ein
     verbleibender Fehlbetrag werden ausdrücklich benannt. Die Karte zeigt
-    die geplante Speicherlademenge (charge_energy_kwh), die Mindestmenge
-    (minimum_charge_energy_kwh) und einen gesetzten SOC-Puffer (soc_buffer).
-    Bei 0 kWh weist sie die reine Bedarfsladung ohne Mindestmenge aus. Die bestehenden
+    die geplante Speicherlademenge (charge_energy_kwh) und das Ladeziel.
+    Die Netzladeeinstellungen darüber zeigen Mindestmenge und SOC-Puffer einmal.
+    Bei 0 kWh steht unter Mindestlademenge „Keine“. Die bestehenden
     Strategien und Schreibpfade des dynamischen Tarifs werden nicht durch
     diese Betriebsart ersetzt; die reine Planung ist für deren spätere
     Verwendung wiederverwendbar.
@@ -363,7 +363,7 @@ requirement_bridge_charge:
     - "tests/test_pv_bridge_forecast.py belegt bei 2-Sekunden-Polls über zehn Minuten zehn Serviceaufrufe auch bei dauerhaft abgelehnten Antworten. Nur HomeAssistantError/TimeoutError wechseln auf zehn Sekunden; empfangene Ablehnungen und lokale Verarbeitungsfehler beenden diesen Retry. Ein unveränderter Ablehnungsgrund erzeugt bis zu einer gültigen Antwort oder einem Quellenwechsel keinen weiteren Logeintrag."
     - "Reicht die Batterie bis PV-Start einschließlich SOC-Puffer, lautet der Status not_needed. Bei 10 % Puffer und prognostizierten 6 % SOC wird eine Ladung eingeplant. Unterhalb des Puffers beginnt eine mögliche Ladung im offenen Tarifabschnitt und berechnet das Ziel aus dem gemessenen SOC."
     - "Bei positivem Bedarf plant ein Auftrag mindestens den eingestellten Energiezuwachs im Speicher ein. Der verfügbare Platz bis zum wirksamen Netzladen Max. SOC kann die Mindestmenge reduzieren. Ein Tarifabschnitt, der bis zum PV-Start zu kurz für die so bestimmte Menge ist, startet keinen Auftrag."
-    - "0 kWh lässt jede positive bedarfsabhängige Lademenge zu und erzeugt keine Mindestmengen-Verlängerung. Das Dashboard zeigt dies in der Ladeplanung an. Einstellbar sind 0 oder 0,5 bis 100 kWh in 0,1-kWh-Schritten sowie 0 bis 100 % SOC-Puffer in ganzen Prozentpunkten."
+    - "0 kWh lässt jede positive bedarfsabhängige Lademenge zu und erzeugt keine Mindestmengen-Verlängerung. Das Dashboard zeigt dies unter Mindestlademenge an. Einstellbar sind 0 oder 0,5 bis 100 kWh in 0,1-kWh-Schritten sowie 0 bis 100 % SOC-Puffer in ganzen Prozentpunkten."
     - "Mindestladung, Puffer und SOC-Einstellungen werden gemeinsam übernommen. Bestätigte Werte und Entwürfe bleiben bei Fehlern erhalten. Änderungen an Mindestmenge oder Puffer entwerten den laufenden Plan auch bei blockiertem Geräteabgleich und während beider Quittierungsphasen."
     - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
     - "Bei ausreichendem Spielraum beginnen und enden Voll- und Teilaufträge zehn Minuten früher. Mit weniger Spielraum wird nur der verfügbare Vorlauf genutzt. Ladedauer, Lademenge und berechneter Fehlbetrag bleiben erhalten."
@@ -831,12 +831,13 @@ requirement_fixed_time_grid_charge:
 
     Die Oberfläche zeigt bestätigte Ladeweise, Startzeit und Netzladeziel.
     Bei beiden Tarifarten bleibt die Ladeplanung bei fester Startzeit sichtbar:
-    Nach "Ladeplanung:" steht "Netzladen startet ab HH:MM Uhr" in Blau;
+    Nach "Ladeplanung:" steht "Feste Startzeit HH:MM Uhr" in Blau;
     ausdrücklich gespeicherte Sekunden ungleich null bleiben sichtbar.
     Der Hinweis verwendet ausschließlich die bestätigte Startzeit, keine
     ungespeicherten Entwürfe, und wird auch ins Englische übersetzt.
-    Eine frisch gemessene laufende Ladung zeigt vorrangig "Ladung läuft..."
-    samt bestehender Restdauer. Inaktive verbrauchsbasierte Planung liefert
+    Eine frisch gemessene laufende Ladung zeigt vorrangig "Ladung läuft"
+    samt bestehender Restdauer. Dann steht die feste Startzeit unter der Überschrift.
+    Die Leseansicht zeigt die Uhrzeit einmal. Inaktive verbrauchsbasierte Planung liefert
     bei dieser Ladeweise keine widersprüchlichen Bedarfs-/Fehlermeldungen.
     Das Startzeitfeld verwendet vollständige Texteingaben HH:MM oder HH:MM:SS;
     vierstellige Eingaben werden erst bei Übernahme normalisiert.
@@ -3769,7 +3770,7 @@ requirement_vue_electricity_tariff:
     bleiben durch den Text unabhängig von der Farbe unterscheidbar.
     Bei aktiver automatischer Netzladung mit festem Netzladeziel und
     ausgeschaltetem Verbrauchsplan erklärt ein neutraler Zusatz den Start:
-    "Start im Niedertarif, sobald der Akkustand unter X % fällt" in DE und
+    "Start im Niedertarif bei unter X % Akkustand" in DE und
     entsprechend in EN. Bei 0 % lautet die Bedingung "bei 0 % Akkustand".
     Die angezeigte Startschwelle stammt aus der bestätigten, verfügbaren Einstellung.
     Bei gemessenen 0 % und geplantem Start hat der vom Backend gemeldete
@@ -3777,14 +3778,27 @@ requirement_vue_electricity_tariff:
     Anzeige die erteilte Freigabe, bis der tatsächliche Ladefluss bestätigt ist.
     Bei Bedarfsplanung nennt der Plan bei 0 % auch für eine Teilladung den
     leeren Speicher als Grund für den Start zum Niedertarifbeginn.
-    Eine verfügbare Entladeprognose bleibt darunter sichtbar.
-    In den übrigen Fällen erhält eine fehlende, nicht verfügbare,
-    ausgeschaltete oder noch nicht bewertete Planung den orangefarbenen Zusatz
-    "Ladezeitpunkt konnte noch nicht errechnet werden". Aus fehlenden Daten
-    darf keine grüne Entwarnung entstehen.
+    Bei gemeldeten 0 % mit anstehendem oder freigegebenem Start entfällt die
+    Reichweitenangabe. Bei ausgeschaltetem Verbrauchsmodus bleibt eine gültige
+    Prognose sichtbar. Nur der eingeschaltete Verbrauchsmodus weist auf eine
+    fehlende Tarif- oder PV-Konfiguration hin. Ohne Inhalt entfällt die Karte.
+    Ein noch offener Bedarf erhält den orangefarbenen Zusatz "Ladebedarf offen",
+    nicht verfügbare Plandaten den Zusatz "Planstatus unbekannt".
+    Nur die Überschrift nennt die Bedarfsentscheidung. Darunter stehen die
+    verfügbare Verbrauchsbasis, das Ladefenster im Niedertarif und der erwartete
+    PV-Start. Innerhalb einer Zeitfolge erscheint das Datum beim ersten Zeitpunkt
+    und bei jedem lokalen Tageswechsel. Liegen Anfang und Ende in derselben
+    Minute, erscheinen die Sekunden. Bei einer Zeitumstellung sind die Zeitzonen
+    beider Endpunkte sichtbar. Meldet der Plan keinen Bedarf, die unabhängige
+    Entladeprognose endet aber mindestens eine Minute vor dem PV-Start, bleiben beide Zeiten sichtbar. Die
+    Überschrift kennzeichnet den Widerspruch in Orange. Erklärt ein SOC-Puffer
+    Ladebedarf trotz ausreichender Reichweite, nennt die Anzeige ihn. Ohne nutzbares
+    Fenster verspricht die Anzeige keine Teilladung. Positive Fehlmengen unter
+    0,01 kWh bleiben als solche erkennbar. Der dynamische Preisladestatus erscheint
+    nur im Planungsbereich.
     Pausierte Aufträge zeigen nur bei erhaltener Bedarfsgrundlage den blauen
     Zusatz. Wird Ladung tatsächlich durchgeführt, lautet die Überschrift
-    "Ladeplanung: Ladung läuft..." mit blauem Zusatz. Ein bestätigter Befehl
+    "Ladeplanung: Ladung läuft" mit blauem Zusatz. Ein bestätigter Befehl
     allein ohne frisch gemessenen Ladefluss genügt dafür nicht. Der Hinweistext
     verwendet die zentral berechnete Restdauer, aktuelle Ladeleistung und
     tatsächliches Ladeziel; eine abweichende maximale Netzladegrenze wird

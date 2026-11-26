@@ -44,7 +44,7 @@ test("confirmed charging decisions update only the colored heading suffix", asyn
     ["paused", scheduled, "needed"],
     ["paused", {}, "unknown"],
     ["insufficient", { ...evaluated, shortfall_kwh: 0.56 }, "needed"],
-    ["off", scheduled, "unknown"],
+    ["off", scheduled, "off"],
     [
       "waiting_for_data",
       { ...evaluated, completion_evaluated_at: null, shortfall_kwh: null },
@@ -59,20 +59,22 @@ test("confirmed charging decisions update only the colored heading suffix", asyn
       "not-needed",
     ],
     ["complete", { ...evaluated, post_charge_status: "needed" }, "needed"],
-    ["unavailable", charging, "unknown"],
+    ["unavailable", charging, "unavailable"],
   ];
   const labels: Record<string, string> = english
     ? {
         "not-needed": "No charging needed",
         needed: "Charging likely needed",
-        charging: "Charging in progress...",
-        unknown: "Charging time could not be calculated yet",
+        charging: "Charging in progress",
+        unknown: "Charging need unknown",
+        unavailable: "Plan status unavailable",
       }
     : {
         "not-needed": "Keine Ladung nötig",
         needed: "Ladung voraussichtlich nötig",
-        charging: "Ladung läuft...",
-        unknown: "Ladezeitpunkt konnte noch nicht errechnet werden",
+        charging: "Ladung läuft",
+        unknown: "Ladebedarf offen",
+        unavailable: "Planstatus unbekannt",
       };
   for (const [state, attributes, demand] of cases) {
     await panel.evaluate(
@@ -93,11 +95,18 @@ test("confirmed charging decisions update only the colored heading suffix", asyn
       },
       { state, attributes },
     );
+    if (demand === "off") {
+      await expect(heading).toHaveText(
+        english ? "Charging plan" : "Ladeplanung",
+      );
+      await expect(suffix).toHaveCount(0);
+      continue;
+    }
     await expect(heading).toHaveText(
       `${english ? "Charging plan" : "Ladeplanung"}: ${labels[demand]}`,
     );
     await expect(suffix).toHaveClass(
-      `charge-plan__demand charge-plan__demand--${demand}`,
+      `charge-plan__demand charge-plan__demand--${demand === "unavailable" ? "unknown" : demand}`,
     );
     await expect(suffix).toHaveAttribute("aria-live", "polite");
     const colors = await suffix.evaluate((element) => {
@@ -194,31 +203,25 @@ test("acknowledged charging replaces the forecast with a live estimate and retur
   }
   await publish("charging", { ...active, charging_active: false });
   await expect(card).toContainText(
-    english
-      ? "Current measurements do not yet confirm"
-      : "noch nicht durch aktuelle Messwerte bestätigt",
+    english ? "Charging power not yet confirmed" : "Ladefluss noch unbestätigt",
   );
   await expect(card).not.toContainText(
-    english ? "Charging in progress..." : "Ladung läuft...",
+    english ? "Charging in progress" : "Ladung läuft",
   );
   for (const state of ["charging", "off"]) {
     await publish(state, active);
     await expect(card.locator("h2")).toHaveText(
       english
-        ? "Charging plan: Charging in progress..."
-        : "Ladeplanung: Ladung läuft...",
+        ? "Charging plan: Charging in progress"
+        : "Ladeplanung: Ladung läuft",
     );
     await expect(card).toContainText(
       english ? "1 hour 2 minutes" : "1 Stunde 2 Minuten",
     );
     await expect(card).toContainText(english ? "1,450 W" : "1.450 W");
+    await expect(card).toContainText(english ? "target 60%" : "Ladeziel 60 %");
     await expect(card).toContainText(
-      english ? "Charging target: 60 %" : "Ladeziel: 60 %",
-    );
-    await expect(card).toContainText(
-      english
-        ? "Maximum grid charging limit: 80 %"
-        : "Maximale Netzladegrenze: 80 %",
+      english ? "grid charging limit 80%" : "Netzladegrenze 80 %",
     );
     await expect(card).not.toContainText("800 W");
     await expect(card).not.toContainText("14.09.2026");
@@ -235,17 +238,15 @@ test("acknowledged charging replaces the forecast with a live estimate and retur
     charging_remaining_seconds: null,
   });
   await expect(card).toContainText(
-    english
-      ? "remaining time cannot yet be calculated"
-      : "Restdauer kann mit den aktuellen Batteriemesswerten noch nicht berechnet werden",
+    english ? "remaining time unknown" : "Restdauer unbekannt",
   );
   await expect(card).not.toContainText(english ? "0 minutes" : "0 Minuten");
   await publish("complete", stopped);
   await expect(card.locator(".charge-plan__demand--unknown")).toBeVisible();
   await expect(card).toContainText(
     english
-      ? "After charging ends, fresh consumption data is collected"
-      : "Nach Ladeende werden neue Verbrauchsdaten für die Ladeplanung gesammelt",
+      ? "Demand after charging is assessed from fresh consumption readings"
+      : "Nach Ladeende wird der Bedarf mit neuen Verbrauchsdaten geprüft",
   );
   await expect(card).not.toContainText("800 W");
   for (const [status, css] of [
@@ -259,20 +260,21 @@ test("acknowledged charging replaces the forecast with a live estimate and retur
         observation_minutes: 1.5,
         average_discharge_w: 321,
         observed_at: "2026-09-14T00:03:30Z",
-        discharge_at: "2026-09-14T08:30:00Z",
+        discharge_at:
+          status === "not_needed"
+            ? "2026-09-14T10:30:00Z"
+            : "2026-09-14T08:30:00Z",
         pv_start: "2026-09-14T09:00:00Z",
       },
     });
     await expect(card.locator(`.charge-plan__demand--${css}`)).toBeVisible();
     await expect(card).toContainText("321 W");
-    await expect(card).toContainText(
-      english ? "last 2 minutes" : "letzten 2 Minuten",
-    );
+    await expect(card).toContainText(english ? "over 2 min" : "über 2 min");
     await expect(card).not.toContainText("800 W");
     await expect(card).toContainText("11:00");
     await expect(card).not.toContainText("07:00");
     await expect(card).not.toContainText(
-      english ? "Charging in progress..." : "Ladung läuft...",
+      english ? "Charging in progress" : "Ladung läuft",
     );
     await expect(card).not.toContainText(
       english ? "1 hour 2 minutes" : "1 Stunde 2 Minuten",
@@ -358,12 +360,13 @@ test("matching forecast and no-charge plan form one permanently visible descript
   const content = await card.innerText();
   expect(content.match(/342 W/g)).toHaveLength(1);
   expect(content.match(/13:46/g)).toHaveLength(1);
-  expect(content).toContain(english ? "last 7 minutes" : "letzten 7 Minuten");
-  expect(content).toContain(
-    english
-      ? "No grid charging is needed"
-      : "Eine Netzladung ist nicht erforderlich",
+  expect(content).toContain(english ? "over 7 min" : "über 7 min");
+  expect(await card.locator("p").innerText()).not.toMatch(
+    /no (grid )?charging (is )?needed|Keine Ladung nötig|Netzladung ist nicht erforderlich/i,
   );
+  expect(
+    content.match(english ? /11 Oct 2026/g : /11\.10\.2026/g),
+  ).toHaveLength(1);
   expect(content).toContain("08:00");
   expect(content).not.toContain(
     english ? "An estimate based on measured" : "Schätzung aus dem gemessenen",
@@ -424,24 +427,28 @@ test("completion and missing assessment remain distinct after a forecast gap", a
       };
     }, state);
     await expect(card).toContainText(
-      english ? "PV forecast was temporarily" : "PV-Prognose zeitweise",
+      english
+        ? "solar forecast was temporarily"
+        : "fehlte zeitweise die PV-Prognose",
     );
     if (state === "waiting_for_data") {
       await expect(card).toContainText(
-        english ? "shortfall is still unknown" : "Fehlmenge ist noch unbekannt",
+        english
+          ? "shortfall is unknown"
+          : "Fehlmenge ohne aktuelle Batteriedaten noch unbekannt",
       );
       await expect(card).not.toContainText("0,00 kWh");
       await expect(card).not.toContainText("0.00 kWh");
     } else if (state === "insufficient") {
       await expect(card).toContainText(
-        english ? "shortfall: 0.56 kWh" : "Fehlbetrag: 0,56 kWh",
+        english ? "0.56 kWh" : "fehlen voraussichtlich 0,56 kWh",
       );
       await expect(card).not.toContainText(
         english ? "charging is planned" : "Aufladung im Niedertarif ist",
       );
     } else {
       await expect(card).toContainText(
-        english ? "grid charging is complete" : "Netzladung ist abgeschlossen",
+        english ? "Grid charging ended" : "Netzladung beendet",
       );
     }
     await verifyCardGeometry(card);
@@ -533,29 +540,25 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
       ? "Charging plan: Charging likely needed"
       : "Ladeplanung: Ladung voraussichtlich nötig",
   );
+  await expect(plan).toContainText(english ? "over 12 min" : "über 12 min");
   await expect(plan).toContainText(
-    english ? "last 12 minutes" : "letzten 12 Minuten",
-  );
-  await expect(plan).toContainText(
-    english ? "average consumption of 800 W" : "durchschnittlich 800 W",
+    english ? "average 800 W" : "durchschnittlich 800 W",
   );
   await expect(plan).toContainText(
     english ? "last until 14 Sept 2026, 03:15" : "bis 14.09.2026, 03:15 Uhr",
   );
   await expect(plan).toContainText(
     english
-      ? "Low-tariff charging will start at 14 Sept 2026, 01:00"
-      : "Aufladung im Niedertarif beginnt um 14.09.2026, 01:00 Uhr",
+      ? "Grid charge planned at low tariff from 01:00"
+      : "Netzladung im Niedertarif von 01:00",
+  );
+  await expect(plan).toContainText(
+    english ? "to 02:00" : "bis 02:00 Uhr geplant",
   );
   await expect(plan).toContainText(
     english
-      ? "continue until 14 Sept 2026, 02:00"
-      : "dauert voraussichtlich bis 14.09.2026, 02:00 Uhr",
-  );
-  await expect(plan).toContainText(
-    english
-      ? "PV starts at 14 Sept 2026, 07:00"
-      : "PV-Start um 14.09.2026, 07:00 Uhr",
+      ? "Solar power should cover consumption from 07:00"
+      : "PV deckt den Verbrauch voraussichtlich ab 07:00 Uhr",
   );
   await expect(panel.locator(".time-window-control")).toHaveCount(0);
   await expect(
@@ -594,15 +597,15 @@ test("consumption-based bridge plan explains the charge and no-charge decision w
       },
     };
   });
-  await expect(plan).toContainText(
+  await expect(plan.locator("h2")).toContainText(
     english
-      ? "No grid charging is needed"
-      : "Eine Netzladung ist nicht erforderlich",
+      ? "Battery forecast and plan disagree"
+      : "Reichweite und Ladeplan weichen ab",
   );
   await expect(plan).toContainText(
     english
-      ? "PV starts at 14 Sept 2026, 07:00"
-      : "PV-Start um 14.09.2026, 07:00 Uhr",
+      ? "Solar power should cover consumption from 07:00"
+      : "PV deckt den Verbrauch voraussichtlich ab 07:00 Uhr",
   );
   await expect(plan).not.toContainText("01:00");
   await expect(plan).not.toContainText("02:00");

@@ -186,7 +186,7 @@ for (const type of ["time_of_use", "dynamic"] as const)
         fixed_time_charging: { enabled: true, start: "00:00" },
       });
       expect(
-        fixture.root.querySelector(".fixed-time-charging-summary")?.textContent,
+        fixture.dashboard.tariff.value?.fixed_time_charging?.start,
       ).toContain("00:00");
       expect(fixture.dashboard.tariff.value?.automation_enabled).toBe(false);
     });
@@ -225,7 +225,7 @@ for (const type of ["time_of_use", "dynamic"] as const)
         fixture.root.querySelector("[role=status]")?.textContent,
       ).toContain("wird übernommen");
       expect(
-        fixture.root.querySelector(".fixed-time-charging-summary")?.textContent,
+        fixture.dashboard.tariff.value?.fixed_time_charging?.start,
       ).toContain("02:00");
       expect(fixture.reset()).toBe(false);
       reject(new Error("offline"));
@@ -238,7 +238,7 @@ for (const type of ["time_of_use", "dynamic"] as const)
         "Entwurf bleibt erhalten",
       );
       expect(
-        fixture.root.querySelector(".fixed-time-charging-summary")?.textContent,
+        fixture.dashboard.tariff.value?.fixed_time_charging?.start,
       ).toContain("02:00");
     });
     it.each([false, true])(

@@ -61,13 +61,12 @@ const text = computed(() =>
         mode: "Ladeweise",
         fixed: "Festes Netzladeziel",
         fixed_time: "Ab fester Uhrzeit",
-        startTime: "Täglicher Ladestart",
         bridge: "Nur Bedarf bis Solarstrom",
         target: "Netzladeziel",
         fixedTarget: "Netzladeziel (%)",
         bridgeTarget: "Maximales Netzladeziel (%)",
         minimumEnergy: "Mindestlademenge",
-        noMinimum: "Keine Mindestlademenge",
+        noMinimum: "Keine",
         minimumHint: "0 kWh für reine Bedarfsladung oder mindestens 0,5 kWh.",
         socBuffer: "SOC-Puffer",
         bufferHint:
@@ -94,13 +93,12 @@ const text = computed(() =>
         mode: "Charging method",
         fixed: "Fixed grid charge target",
         fixed_time: "Start at a fixed time",
-        startTime: "Daily charging start",
         bridge: "Only what is needed until solar power",
         target: "Grid charge target",
         fixedTarget: "Grid charge target (%)",
         bridgeTarget: "Maximum grid charge target (%)",
         minimumEnergy: "Minimum charging energy",
-        noMinimum: "No minimum charge",
+        noMinimum: "None",
         minimumHint:
           "Enter 0 kWh to charge according to need, or at least 0.5 kWh.",
         socBuffer: "SOC buffer",
@@ -223,17 +221,6 @@ async function choose(method: Method): Promise<void> {
         <div>
           <dt>{{ text.saved }}</dt>
           <dd>{{ selected ? text[selected] : text.unavailable }}</dd>
-        </div>
-      </dl>
-      <dl
-        v-if="selected === 'fixed_time'"
-        class="electricity-summary-rows fixed-time-charging-summary"
-      >
-        <div>
-          <dt>{{ text.startTime }}</dt>
-          <dd>
-            {{ fixedTime.displayStart(fixedTime.confirmed.value?.start) }}
-          </dd>
         </div>
       </dl>
       <div

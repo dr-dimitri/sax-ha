@@ -212,7 +212,7 @@ afterEach(() => {
 });
 
 it.each(["de", "en"])(
-  "shows demand-based energy and the confirmed reserve when the minimum is zero (%s)",
+  "shows the planned energy without repeating the minimum and reserve from the settings (%s)",
   async (language) => {
     const fixture = await mount(language);
     const german = language === "de";
@@ -226,14 +226,14 @@ it.each(["de", "en"])(
       ...settings,
       charge_energy_kwh: 0.32,
     });
-    expect(fixture.root.textContent).toContain(
+    expect(fixture.root.textContent).not.toContain(
       german ? "Keine Mindestlademenge" : "No minimum charge",
     );
     expect(fixture.root.textContent).toContain(
-      german ? "0,32 kWh Netzladung" : "0.32 kWh",
+      german ? "Geplante Lademenge 0,32 kWh" : "0.32 kWh",
     );
-    expect(fixture.root.textContent).toContain(
-      german ? "10 % SOC als Puffer" : "10% SOC buffer",
+    expect(fixture.root.textContent).not.toContain(
+      german ? "SOC-Puffer" : "SOC buffer",
     );
     await fixture.update("not_needed", { ...settings, charge_energy_kwh: 0 });
     expect(fixture.root.querySelector("h2")?.textContent).toContain(
@@ -252,11 +252,13 @@ it.each(["de", "en-GB"])(
   async (language) => {
     const fixture = await mount(language);
     const empty = { ...planned, empty_battery_start: planned.charge_start };
-    const reason =
-      language === "de" ? "Der Speicher meldet 0 %" : "The battery reports 0%";
+    const reason = language === "de" ? "Akku bei 0 %" : "Battery at 0%";
     for (const status of ["planned", "insufficient"]) {
       await fixture.update(status, empty);
+      await fixture.forecast("2026-09-14T00:30:00Z");
       expect(fixture.root.textContent).toContain(reason);
+      expect(fixture.root.textContent).not.toContain("456 W");
+      expect(fixture.root.textContent).not.toContain("800 W");
       expect(fixture.root.textContent).toContain("00:00");
       expect(fixture.root.textContent).toContain("00:40");
     }
@@ -266,6 +268,75 @@ it.each(["de", "en-GB"])(
     }
     await fixture.update("planned", planned);
     expect(fixture.root.textContent).not.toContain(reason);
+  },
+);
+
+it.each(["de", "en-GB"])(
+  "flags conflicting estimates and keeps the current readings visible (%s)",
+  async (language) => {
+    const fixture = await mount(language);
+    await fixture.update("not_needed", planned);
+    await fixture.forecast("2026-09-14T04:00:00Z");
+    expect(
+      fixture.root.querySelector(".charge-plan__demand--conflict"),
+    ).not.toBeNull();
+    expect(fixture.root.textContent).not.toMatch(/456 W|23:30/);
+    expect(fixture.root.textContent).toContain("800 W");
+    expect(fixture.root.textContent).toContain("06:00");
+    expect(fixture.root.textContent?.match(/07:00/g)).toHaveLength(1);
+
+    await fixture.forecast("2026-09-14T04:59:30Z");
+    expect(
+      fixture.root.querySelector(".charge-plan__demand--not-needed"),
+    ).not.toBeNull();
+    await fixture.forecast(planned.pv_start);
+    expect(
+      fixture.root.querySelector(".charge-plan__demand--not-needed"),
+    ).not.toBeNull();
+    expect(fixture.root.textContent).toContain("800 W");
+    expect(fixture.root.textContent?.match(/07:00/g)).toHaveLength(1);
+
+    await fixture.update("planned", { ...planned, soc_buffer: 10 });
+    await fixture.forecast("2026-09-14T06:00:00Z");
+    expect(
+      fixture.root.querySelector(".charge-plan__demand--needed"),
+    ).not.toBeNull();
+    expect(fixture.root.textContent).toContain(
+      language === "de"
+        ? "berücksichtigt den SOC-Puffer"
+        : "includes the battery reserve",
+    );
+  },
+);
+
+it.each(["de", "en-GB"])(
+  "keeps positive shortfalls visible both without a usable window and during measured charging (%s)",
+  async (language) => {
+    const fixture = await mount(language);
+    const de = language === "de";
+    for (const state of ["insufficient", "charging"]) {
+      await fixture.update(state, {
+        ...(state === "charging" ? charging : { reason: "no_usable_window" }),
+        shortfall_kwh: 0.002,
+        soc_buffer: 10,
+      });
+      expect(fixture.root.textContent).toContain(
+        de ? "weniger als 0,01 kWh" : "less than 0.01 kWh",
+      );
+      expect(fixture.root.textContent).not.toMatch(/0[.,]00 kWh/);
+      expect(fixture.root.textContent).toContain(
+        de ? "Verbrauch und SOC-Puffer" : "consumption and the battery reserve",
+      );
+      expect(fixture.root.textContent).toContain(
+        state === "charging"
+          ? de
+            ? "Ladung läuft"
+            : "Charging in progress"
+          : de
+            ? "Kein nutzbares Ladefenster"
+            : "No usable low-tariff charging window",
+      );
+    }
   },
 );
 
@@ -288,8 +359,8 @@ describe("REQ-FIXED-TIME-GRID-CHARGE: confirmed start in the planning heading", 
           )!;
           expect(fixture.root.querySelector("h2")?.textContent).toBe(
             language === "de"
-              ? `Ladeplanung: Netzladen startet ab ${displayed} Uhr`
-              : `Charging plan: Grid charging starts at ${displayed}`,
+              ? `Ladeplanung: Feste Startzeit ${displayed} Uhr`
+              : `Charging plan: Scheduled start ${displayed}`,
           );
           expect(suffix.getAttribute("aria-live")).toBe("polite");
           expect(fixture.root.querySelector("p")).toBeNull();
@@ -312,18 +383,16 @@ describe("REQ-FIXED-TIME-GRID-CHARGE: confirmed start in the planning heading", 
     await fixture.update("off", charging);
     await fixture.control("off", true, "bridge_pv_start_required");
     expect(fixture.root.querySelector("h2")?.textContent).toBe(
-      "Ladeplanung: Ladung läuft...",
+      "Ladeplanung: Ladung läuft",
     );
     expect(fixture.root.textContent).toContain("1 Stunde 2 Minuten");
     expect(fixture.root.textContent).not.toContain("Zum Einschalten");
     await fixture.update("off", { charging_active: false });
     expect(fixture.root.querySelector("h2")?.textContent).toBe(
-      "Ladeplanung: Netzladen startet ab 02:00 Uhr",
+      "Ladeplanung: Feste Startzeit 02:00 Uhr",
     );
     await fixture.tariff({ enabled: false, start: "02:00:00" });
-    expect(
-      fixture.root.querySelector(".charge-plan__demand--unknown"),
-    ).not.toBeNull();
+    expect(fixture.root.querySelector(".charge-plan__demand")).toBeNull();
   });
 
   it.each([null, "", "02", "24:00:00", "02:60:00", "invalid"])(
@@ -335,9 +404,7 @@ describe("REQ-FIXED-TIME-GRID-CHARGE: confirmed start in the planning heading", 
       expect(
         fixture.root.querySelector(".charge-plan__demand--fixed-time"),
       ).toBeNull();
-      expect(
-        fixture.root.querySelector(".charge-plan__demand--unknown"),
-      ).not.toBeNull();
+      expect(fixture.root.querySelector(".charge-plan")).toBeNull();
     },
   );
 });
@@ -352,8 +419,8 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
         await fixture.forecast("2026-09-14T00:30:00Z");
         expect(fixture.root.querySelector("h2")?.textContent).toBe(
           language === "de"
-            ? "Ladeplanung: Ladung läuft..."
-            : "Charging plan: Charging in progress...",
+            ? "Ladeplanung: Ladung läuft"
+            : "Charging plan: Charging in progress",
         );
         expect(
           fixture.root.querySelector(".charge-plan__demand--charging"),
@@ -365,12 +432,10 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
           language === "de" ? "1 Stunde 2 Minuten" : "1 hour 2 minutes",
         );
         expect(fixture.root.textContent).toContain(
-          language === "de" ? "Ladeziel: 42,5 %" : "Charging target: 42.5 %",
+          language === "de" ? "Ladeziel 42,5 %" : "target 42.5%",
         );
         expect(fixture.root.textContent).toContain(
-          language === "de"
-            ? "Maximale Netzladegrenze: 80 %"
-            : "Maximum grid charging limit: 80 %",
+          language === "de" ? "Netzladegrenze 80 %" : "grid charging limit 80%",
         );
         expect(fixture.root.textContent).not.toContain("456 W");
         expect(fixture.root.textContent).not.toContain("800 W");
@@ -384,6 +449,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
   );
 
   it.each([
+    [0, "unter 1 Minute", "less than 1 minute"],
     [1, "1 Minute", "1 minute"],
     [60, "1 Minute", "1 minute"],
     [60.1, "2 Minuten", "2 minutes"],
@@ -406,9 +472,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
         });
         expect(fixture.root.textContent).toContain(expected);
         expect(fixture.root.textContent).not.toContain(
-          language === "de"
-            ? "Maximale Netzladegrenze"
-            : "Maximum grid charging limit",
+          language === "de" ? "Netzladegrenze" : "grid charging limit",
         );
       }
     },
@@ -424,9 +488,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
           charging_remaining_seconds: seconds,
         });
         expect(fixture.root.textContent).toContain(
-          language === "de"
-            ? "Die Restdauer kann mit den aktuellen Batteriemesswerten noch nicht berechnet werden"
-            : "The remaining time cannot yet be calculated",
+          language === "de" ? "Restdauer unbekannt" : "remaining time unknown",
         );
         expect(fixture.root.textContent).not.toContain("0 Minuten");
         expect(fixture.root.textContent).not.toContain("0 minutes");
@@ -441,13 +503,11 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
       ...charging,
       charging_active: false,
     });
-    expect(fixture.root.textContent).toContain(
-      "noch nicht durch aktuelle Messwerte bestätigt",
-    );
+    expect(fixture.root.textContent).toContain("Ladefluss noch unbestätigt");
     expect(fixture.root.textContent).not.toContain("läuft");
     expect(fixture.root.textContent).not.toContain("Ladeleistung");
     await fixture.update("charging", charging);
-    expect(fixture.root.textContent).toContain("Ladung läuft...");
+    expect(fixture.root.textContent).toContain("Ladung läuft");
     for (const status of [
       "paused",
       "waiting_for_data",
@@ -459,12 +519,12 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
       expect(
         fixture.root.querySelector(".charge-plan__demand--charging"),
       ).toBeNull();
-      expect(fixture.root.textContent).not.toContain("Ladung läuft...");
+      expect(fixture.root.textContent).not.toContain("Ladung läuft");
       expect(fixture.root.textContent).not.toContain("1 Stunde 2 Minuten");
     }
     await fixture.update("charging", charging);
     await fixture.disconnect();
-    expect(fixture.root.textContent).not.toContain("Ladung läuft...");
+    expect(fixture.root.textContent).not.toContain("Ladung läuft");
     expect(fixture.root.textContent).not.toContain("1 Stunde 2 Minuten");
   });
 
@@ -488,8 +548,8 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
       ).not.toBeNull();
       expect(fixture.root.textContent).toContain(
         language === "de"
-          ? "Nach Ladeende werden neue Verbrauchsdaten für die Ladeplanung gesammelt"
-          : "After charging ends, fresh consumption data is collected",
+          ? "Nach Ladeende wird der Bedarf mit neuen Verbrauchsdaten geprüft"
+          : "Demand after charging is assessed from fresh consumption readings",
       );
       expect(fixture.root.textContent).not.toContain("800 W");
       for (const [status, css] of [
@@ -500,7 +560,10 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
           ...stopped,
           post_charge_status: status,
           post_charge_forecast_attributes: {
-            discharge_at: "2026-09-14T08:30:00Z",
+            discharge_at:
+              status === "not_needed"
+                ? "2026-09-14T10:30:00Z"
+                : "2026-09-14T08:30:00Z",
             observation_minutes: 1.5,
             average_discharge_w: 321,
             observed_at: "2026-09-13T22:43:30Z",
@@ -512,18 +575,16 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging progress", () => {
         ).not.toBeNull();
         expect(fixture.root.textContent).toContain("321 W");
         expect(fixture.root.textContent).toContain(
-          language === "de" ? "letzten 2 Minuten" : "last 2 minutes",
+          language === "de" ? "über 2 min" : "over 2 min",
         );
         expect(fixture.root.textContent).not.toContain("456 W");
         expect(fixture.root.textContent).not.toContain("800 W");
         expect(fixture.root.textContent).toContain("11:00");
         expect(fixture.root.textContent).not.toContain("07:00");
-        expect(fixture.root.textContent).not.toContain("Ladung läuft...");
+        expect(fixture.root.textContent).not.toContain("Ladung läuft");
         expect(fixture.root.textContent).not.toContain("1 Stunde 2 Minuten");
         expect(fixture.root.textContent).not.toContain(
-          language === "de"
-            ? "Netzladung ist abgeschlossen"
-            : "grid charging is complete",
+          language === "de" ? "Netzladung beendet" : "Grid charging ended",
         );
         expect(fixture.root.querySelector(".charge-plan__target")).toBeNull();
       }
@@ -550,11 +611,7 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging need in the heading", (
         ["paused", { shortfall_kwh: 0.56 }, "needed"],
         ["paused", {}, "unknown"],
         ["paused", { ...planned, target_soc: 101 }, "unknown"],
-        ["off", planned, "unknown"],
         ["waiting_for_data", planned, "unknown"],
-        ["unknown", planned, "unknown"],
-        ["unavailable", planned, "unknown"],
-        ["unrecognized_state", planned, "unknown"],
         ["complete", planned, "unknown"],
         ["complete", evaluated, "not-needed"],
         ["complete", { ...evaluated, shortfall_kwh: 0.001 }, "not-needed"],
@@ -585,12 +642,12 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: confirmed charging need in the heading", (
           ? {
               "not-needed": "Keine Ladung nötig",
               needed: "Ladung voraussichtlich nötig",
-              unknown: "Ladezeitpunkt konnte noch nicht errechnet werden",
+              unknown: "Ladebedarf offen",
             }
           : {
               "not-needed": "No charging needed",
               needed: "Charging likely needed",
-              unknown: "Charging time could not be calculated yet",
+              unknown: "Charging need unknown",
             };
       for (const [state, attributes, demand] of cases) {
         await fixture.update(state, attributes);
@@ -631,20 +688,20 @@ describe("REQ-BRIDGE-CHARGE: completion during a data gap", () => {
         data_gap_reason: "pv_start_missing",
       });
       expect(root.textContent).toContain(
-        language === "de"
-          ? "Netzladung ist beendet"
-          : "grid charging has ended",
+        language === "de" ? "Netzladung beendet" : "Grid charging ended",
       );
       expect(root.textContent).toContain(
-        language === "de" ? "Fehlbetrag: 0,56 kWh" : "shortfall: 0.56 kWh",
+        language === "de" ? "fehlen voraussichtlich 0,56 kWh" : "0.56 kWh",
       );
       expect(root.textContent).toContain(
         language === "de"
-          ? "PV-Prognose zeitweise"
-          : "PV forecast was temporarily",
+          ? "fehlte zeitweise die PV-Prognose"
+          : "solar forecast was temporarily",
       );
       expect(root.textContent).toContain(
-        language === "de" ? "Bewertet am" : "Assessed at",
+        language === "de"
+          ? "Letzte Ladung bewertet am"
+          : "Last charge assessed on",
       );
       expect(root.textContent).not.toContain(
         language === "de"
@@ -661,14 +718,12 @@ describe("REQ-BRIDGE-CHARGE: completion during a data gap", () => {
         data_gap_reason: "measurements_missing",
       });
       expect(root.textContent).toContain(
-        language === "de"
-          ? "Netzladung ist abgeschlossen"
-          : "grid charging is complete",
+        language === "de" ? "Netzladung beendet" : "Grid charging ended",
       );
       expect(root.textContent).toContain(
         language === "de"
-          ? "Batteriemesswerte zeitweise"
-          : "Battery measurements were temporarily",
+          ? "fehlten zeitweise Batteriemesswerte"
+          : "Battery readings were temporarily",
       );
     },
   );
@@ -686,14 +741,12 @@ describe("REQ-BRIDGE-CHARGE: completion during a data gap", () => {
         data_gap_reason: "measurements_missing",
       });
       expect(root.textContent).toContain(
-        language === "de"
-          ? "Netzladung ist beendet"
-          : "grid charging has ended",
+        language === "de" ? "Netzladung beendet" : "Grid charging ended",
       );
       expect(root.textContent).toContain(
         language === "de"
-          ? "Fehlmenge ist noch unbekannt"
-          : "shortfall is still unknown",
+          ? "Fehlmenge ohne aktuelle Batteriedaten noch unbekannt"
+          : "shortfall is unknown",
       );
       expect(root.textContent).not.toContain("0,00 kWh");
       expect(root.textContent).not.toContain("0.00 kWh");
@@ -712,13 +765,15 @@ describe("consumption-based charging plan", () => {
     expect(root.querySelector("h2")?.textContent).toBe(
       "Ladeplanung: Ladung voraussichtlich nötig",
     );
-    expect(root.textContent).toContain("letzten 13 Minuten");
+    expect(root.textContent).toContain("über 13 min");
     expect(root.textContent).toContain("durchschnittlich 456 W");
-    expect(root.textContent).toContain("13.09.2026, 23:30 Uhr entleert");
-    expect(root.textContent).toContain("Niedertarif um 14.09.2026, 00:00 Uhr");
-    expect(root.textContent).toContain("bis 14.09.2026, 00:40 Uhr");
-    expect(root.textContent).toContain("PV-Start um 14.09.2026, 07:00 Uhr");
-    expect(root.textContent).toContain("Geplantes Netzladeziel: 42,5 %");
+    expect(root.textContent).toContain("laut Plan bis 13.09.2026, 23:30 Uhr");
+    expect(root.textContent).toContain("Niedertarif von 14.09.2026, 00:00");
+    expect(root.textContent).toContain("bis 00:40 Uhr");
+    expect(root.textContent).toContain(
+      "PV deckt den Verbrauch voraussichtlich ab 07:00 Uhr",
+    );
+    expect(root.textContent).toContain("Ladeziel 42,5 %");
     expect(root.querySelectorAll("button, input, select, form")).toHaveLength(
       0,
     );
@@ -731,8 +786,8 @@ describe("consumption-based charging plan", () => {
     expect(root.querySelector("h2")?.textContent).toBe(
       "Charging plan: Charging likely needed",
     );
-    expect(root.textContent).toContain("last 13 minutes");
-    expect(root.textContent).toContain("low-tariff charging will start");
+    expect(root.textContent).toContain("over 13 min");
+    expect(root.textContent).toContain("Grid charge planned at low tariff");
     expect(root.textContent).toContain("14 Sept 2026, 00:00");
     hass.value = {
       ...hass.value,
@@ -740,8 +795,24 @@ describe("consumption-based charging plan", () => {
       locale: { language: "en-US", time_format: "am_pm" },
     };
     await flush();
-    expect(root.textContent).toContain("Sep 13, 2026, 6:00 PM");
+    expect(root.textContent).toContain("Sep 13, 2026, 5:30 PM");
+    expect(root.textContent).toContain("6:00 PM");
     expect(root.textContent).toContain("Sep 14, 2026, 1:00 AM");
+  });
+
+  it("keeps short windows and the repeated autumn hour distinguishable", async () => {
+    const { root, update } = await mount();
+    await update("planned", {
+      charge_start: "2026-09-13T22:00:05Z",
+      charge_end: "2026-09-13T22:00:45Z",
+    });
+    expect(root.textContent).toContain("00:00:05 bis 00:00:45");
+    await update("planned", {
+      charge_start: "2026-10-25T00:45:00Z",
+      charge_end: "2026-10-25T01:15:00Z",
+    });
+    expect(root.textContent).toMatch(/02:45:00 (MESZ|GMT\+2)/);
+    expect(root.textContent).toMatch(/02:15:00 (MEZ|GMT\+1)/);
   });
 
   it.each(["de", "en-GB"])(
@@ -761,13 +832,11 @@ describe("consumption-based charging plan", () => {
           observation_minutes: minutes,
         });
         const expected =
-          language === "de"
-            ? `letzten ${rounded} Minuten`
-            : `last ${rounded} minutes`;
+          language === "de" ? `über ${rounded} min` : `over ${rounded} min`;
         expect(fixture.root.textContent).toContain(expected);
         expect(
           fixture.root.querySelector(".charge-plan__target")?.textContent,
-        ).toContain(language === "de" ? "42,5 %" : "42.5 %");
+        ).toContain(language === "de" ? "42,5 %" : "42.5%");
         await fixture.forecast("2026-09-14T00:30:00Z", {
           observation_minutes: minutes,
           average_discharge_w: 800,
@@ -790,9 +859,8 @@ describe("consumption-based charging plan", () => {
           ...planned,
           observation_minutes: minutes,
         });
-        expect(fixture.root.textContent).not.toContain(
-          language === "de" ? "letzten" : "last",
-        );
+        expect(fixture.root.textContent).not.toContain("456 W");
+        expect(fixture.root.textContent).not.toContain("23:30");
         await fixture.forecast("2026-09-14T00:30:00Z", {
           observation_minutes: minutes,
           average_discharge_w: 800,
@@ -810,33 +878,37 @@ describe("consumption-based charging plan", () => {
         ...planned,
         discharge_at: "2026-09-14T06:00:00Z",
       });
-      expect(root.textContent).toContain(
-        language === "de"
-          ? "Eine Netzladung ist nicht erforderlich"
-          : "No grid charging is needed",
+      expect(root.querySelector("h2")?.textContent).toContain(
+        language === "de" ? "Keine Ladung nötig" : "No charging needed",
       );
+      expect(root.querySelector("p")?.textContent).toContain("07:00");
       expect(root.textContent).not.toContain("00:40");
       expect(root.querySelector(".charge-plan__target")).toBeNull();
     },
   );
 
   it.each([
-    ["waiting_for_data", "pv_start_missing", "PV-Prognose", "PV forecast"],
+    [
+      "waiting_for_data",
+      "pv_start_missing",
+      "PV-Prognose",
+      "30 minutes of solar power",
+    ],
     [
       "waiting_for_data",
       "consumption_missing",
-      "Verbrauchsmesswerten",
-      "consumption measurements",
+      "Verbrauchsmessung",
+      "consumption readings",
     ],
     [
       "waiting_for_data",
       "measurements_missing",
       "Batteriemesswerte",
-      "battery measurements",
+      "battery readings",
     ],
     ["paused", "calibration", "Batteriekalibrierung", "Battery calibration"],
-    ["paused", "pv_surplus", "PV-Überschuss", "PV surplus"],
-    ["paused", "manual_charge", "manuelle Ladung", "Manual charging"],
+    ["paused", "pv_surplus", "PV-Überschuss", "Surplus solar"],
+    ["paused", "manual_charge", "Manuelle Ladung", "Manual charging"],
   ])(
     "explains the reason %s/%s in both languages without exposing internal codes",
     async (state, reason, german, english) => {
@@ -861,15 +933,13 @@ describe("consumption-based charging plan", () => {
       for (const attributes of [{}, { reason: "disabled" }]) {
         await update("off", attributes);
         expect(root.querySelector(".charge-plan__description")).toBeNull();
-        expect(
-          root.querySelector(".charge-plan__demand--unknown"),
-        ).not.toBeNull();
+        expect(root.querySelector(".charge-plan")).toBeNull();
       }
       await update("waiting_for_data", { reason: "private_new_reason" });
       expect(root.textContent).toContain(
         language === "de"
-          ? "mindestens eine Minute Beobachtungszeit"
-          : "at least one minute of observations",
+          ? "Gültige Planungsdaten fehlen"
+          : "Valid planning data is missing",
       );
       expect(root.textContent).not.toContain("private_new_reason");
     },
@@ -878,18 +948,19 @@ describe("consumption-based charging plan", () => {
   it("updates running, paused, complete and disabled plans without stale promises", async () => {
     const { root, update } = await mount();
     await update("charging");
-    expect(root.textContent).toContain("Niedertarifladung läuft seit");
+    expect(root.textContent).toContain("Ladefluss noch unbestätigt");
     for (const [state, expected] of [
-      ["paused", "Ladeplanung ist pausiert"],
-      ["complete", "Netzladung ist abgeschlossen"],
-      ["off", "Ladezeitpunkt konnte noch nicht errechnet werden"],
-      ["waiting_for_data", "mindestens eine Minute Beobachtungszeit"],
+      ["paused", "Netzladung pausiert"],
+      ["complete", "Netzladung beendet"],
+      ["waiting_for_data", "Gültige Planungsdaten fehlen"],
     ]) {
       await update(state);
       expect(root.textContent).toContain(expected);
       expect(root.textContent).not.toContain("14.09.2026");
       expect(root.querySelector(".charge-plan__target")).toBeNull();
     }
+    await update("off");
+    expect(root.querySelector(".charge-plan")).toBeNull();
   });
 
   it.each(["de", "en-GB"])(
@@ -898,15 +969,15 @@ describe("consumption-based charging plan", () => {
       const { root, update } = await mount(language);
       await update("insufficient", { ...planned, shortfall_kwh: 1.234 });
       expect(root.textContent).toContain(
-        language === "de" ? "Fehlbetrag: 1,23 kWh" : "shortfall: 1.23 kWh",
+        language === "de" ? "fehlen voraussichtlich 1,23 kWh" : "1.23 kWh",
       );
       expect(root.textContent).toContain(
-        language === "de"
-          ? "teilweise Aufladung"
-          : "Partial low-tariff charging",
+        language === "de" ? "Teilladung" : "Partial charge",
       );
-      expect(root.textContent).not.toContain("Daher beginnt");
-      expect(root.textContent).not.toContain("Therefore");
+      expect(root.textContent).not.toContain("Netzladung im Niedertarif von");
+      expect(root.textContent).not.toContain(
+        "Grid charge planned at low tariff",
+      );
       await update("insufficient", { pv_start: planned.pv_start });
       expect(root.textContent).not.toContain("NaN");
       expect(root.textContent).not.toContain("kWh");
@@ -914,13 +985,20 @@ describe("consumption-based charging plan", () => {
     },
   );
 
-  it.each([null, "invalid", "2026-09-13T22:00:00", ""])(
+  it.each([
+    null,
+    "invalid",
+    "2026-09-13T22:00:00",
+    "",
+    planned.charge_end,
+    "2026-09-13T23:00:00Z",
+  ])(
     "does not invent a charging time for a missing or invalid timestamp (%s)",
     async (chargeStart) => {
       const { root, update } = await mount();
       await update("planned", { ...planned, charge_start: chargeStart });
       expect(root.textContent).toContain("noch unvollständig");
-      expect(root.textContent).not.toContain("Daher beginnt");
+      expect(root.textContent).not.toContain("Netzladung im Niedertarif von");
       expect(root.textContent).not.toContain("Invalid Date");
     },
   );
@@ -928,11 +1006,11 @@ describe("consumption-based charging plan", () => {
   it("keeps the shortfall warning when a partial plan starts charging", async () => {
     const { root, update } = await mount();
     await update("charging", { ...planned, shortfall_kwh: 1.2 });
-    expect(root.textContent).toContain("Fehlbetrag: 1,20 kWh");
-    expect(root.textContent).toContain(
-      "teilweise Aufladung im Niedertarif läuft seit",
+    expect(root.textContent).toContain("fehlen voraussichtlich 1,20 kWh");
+    expect(root.textContent).toContain("Teilladung im Niedertarif von");
+    expect(root.textContent).not.toContain(
+      "PV deckt den Verbrauch voraussichtlich ab",
     );
-    expect(root.textContent).not.toContain("um die Zeit bis zum PV-Start um");
   });
 
   it("omits invalid measurements and missing forecast timestamps", async () => {
@@ -943,28 +1021,32 @@ describe("consumption-based charging plan", () => {
       average_discharge_w: "NaN",
       target_soc: 101,
     });
-    expect(root.textContent).not.toContain("letzten");
+    expect(root.textContent).not.toContain("23:30");
     expect(root.textContent).not.toContain("NaN");
-    expect(root.textContent).not.toContain("Netzladeziel");
+    expect(root.textContent).not.toContain("Ladeziel");
     await update("not_needed", {});
-    expect(root.textContent).toContain("derzeit nicht erforderlich");
-    expect(root.textContent).not.toContain("PV-Start um");
+    expect(root.querySelector("h2")?.textContent).toContain(
+      "Keine Ladung nötig",
+    );
+    expect(root.querySelector("p")).toBeNull();
   });
 
   it("follows metadata availability and hides stale plans when the sensor is unavailable", async () => {
     const fixture = await mount();
     for (const state of ["unknown", "unavailable", "unrecognized_state"]) {
       await fixture.update(state);
-      expect(fixture.root.textContent).toContain("derzeit nicht verfügbar");
+      expect(fixture.root.textContent).toContain("Planstatus unbekannt");
       expect(fixture.root.textContent).not.toContain("14.09.2026");
     }
     await fixture.metadata(false);
     expect(fixture.root.querySelector(".charge-plan")).toBeNull();
     await fixture.metadata(true);
     await fixture.update("planned");
-    expect(fixture.root.textContent).toContain("Daher beginnt");
+    expect(fixture.root.textContent).toContain("Netzladung im Niedertarif von");
     await fixture.disconnect();
-    expect(fixture.root.textContent).not.toContain("Daher beginnt");
+    expect(fixture.root.textContent).not.toContain(
+      "Netzladung im Niedertarif von",
+    );
     expect(fixture.callService).not.toHaveBeenCalled();
     expect(fixture.callWS).not.toHaveBeenCalled();
   });
@@ -973,15 +1055,19 @@ describe("consumption-based charging plan", () => {
 it.each([
   ["de", "bridge_pv_start_required", "PV-Prognosequelle auswählen"],
   ["de", "bridge_tariff_required", "zeitvariablen Tarif einrichten"],
-  ["en", "bridge_pv_start_required", "select a PV forecast source"],
-  ["en", "bridge_tariff_required", "configure a time-of-use tariff"],
+  ["en", "bridge_pv_start_required", "Select a solar forecast source"],
+  ["en", "bridge_tariff_required", "Configure a time-of-use tariff"],
 ])(
-  "explains missing planning configuration (%s, %s)",
+  "only explains missing configuration for enabled consumption planning (%s, %s)",
   async (language, error, hint) => {
-    const { root, control } = await mount(language, true);
+    const { root, control, update } = await mount(language, true);
+    await update("waiting_for_data", { reason: "pv_start_missing" });
     await control("off", true, error);
+    expect(root.textContent).not.toContain(hint);
+    await control("on", true, error);
     expect(root.textContent).toContain(hint);
-    await control("off");
+    expect(root.querySelectorAll("p")).toHaveLength(1);
+    await control("on");
     expect(root.textContent).not.toContain(hint);
   },
 );
@@ -1009,10 +1095,8 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
       expect(fixture.root.querySelectorAll("h2, h3")).toHaveLength(1);
       expect(description.textContent?.match(/342 W/g)).toHaveLength(1);
       expect(description.textContent?.match(/13:46/g)).toHaveLength(1);
-      expect(description.textContent).toContain(
-        language === "de"
-          ? "Eine Netzladung ist nicht erforderlich"
-          : "No grid charging is needed",
+      expect(description.textContent).not.toMatch(
+        /Netzladung ist nicht erforderlich|Keine Ladung nötig|no (grid )?charging (is )?needed/i,
       );
       expect(description.textContent).toContain("08:00");
       expect(fixture.root.textContent).not.toContain(
@@ -1029,7 +1113,7 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
     await fixture.update("charging");
     await fixture.forecast("unavailable");
     expect(fixture.root.textContent).toContain("durchschnittlich 456 W");
-    expect(fixture.root.textContent).toContain("Niedertarifladung läuft seit");
+    expect(fixture.root.textContent).toContain("Ladefluss noch unbestätigt");
     expect(fixture.root.querySelector(".charge-plan__forecast")).toBeNull();
   });
 
@@ -1041,7 +1125,7 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
       await fixture.forecast("2026-09-14T00:30:00Z");
       const forecast = fixture.root.querySelector(".charge-plan__forecast")!;
       expect(forecast.textContent).toContain("durchschnittlich 800 W");
-      expect(forecast.textContent).toContain("letzten 12 Minuten");
+      expect(forecast.textContent).toContain("über 12 min");
       expect(forecast.textContent).toContain("14.09.2026, 02:30 Uhr");
       expect(fixture.root.querySelectorAll("h2, h3")).toHaveLength(1);
       expect(fixture.root.querySelector("button, input, form")).toBeNull();
@@ -1054,7 +1138,7 @@ describe("REQ-DISCHARGE-FORECAST: current measured forecast in the tariff plan",
     const fixture = await mount("en-GB");
     await fixture.forecast("2026-09-14T00:30:00Z");
     const forecast = fixture.root.querySelector(".charge-plan__forecast")!;
-    expect(forecast.textContent).toContain("average consumption of 800 W");
+    expect(forecast.textContent).toContain("average 800 W");
     expect(forecast.textContent).not.toContain("456 W");
     expect(forecast.textContent).not.toContain("13 minutes");
     fixture.hass.value = {

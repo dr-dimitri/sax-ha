@@ -459,8 +459,8 @@ test("fixed-target charging shows the confirmed low-tariff start rule beside the
   await publishThreshold("10");
   await expect(heading).toHaveText(
     english
-      ? "Charging plan: Starts during low-tariff hours when the battery falls below 10%"
-      : "Ladeplanung: Start im Niedertarif, sobald der Akkustand unter 10 % fällt",
+      ? "Charging plan: Low-tariff charging below 10% battery charge"
+      : "Ladeplanung: Start im Niedertarif bei unter 10 % Akkustand",
   );
   await expect(suffix).toHaveCSS(
     "color",
@@ -471,12 +471,12 @@ test("fixed-target charging shows the confirmed low-tariff start rule beside the
 
   await publishThreshold("10", { empty_battery_start: "2026-09-13T20:00:00Z" });
   await expect(suffix).toContainText(
-    english ? "start of the low tariff" : "Beginn des Niedertarifs",
+    english ? "start of low tariff" : "Niedertarifbeginn",
   );
   await expect(suffix).toContainText("22:00");
   await publishThreshold("10", { empty_battery_start_due: true });
   await expect(suffix).toContainText(
-    english ? "current low-tariff period" : "laufenden Niedertarif freigegeben",
+    english ? "this low-tariff period" : "Niedertarif freigegeben",
   );
 
   await publishThreshold("0");
@@ -486,7 +486,7 @@ test("fixed-target charging shows the confirmed low-tariff start rule beside the
       : "Start im Niedertarif bei 0 % Akkustand",
   );
   await publishThreshold("unavailable");
-  await expect(suffix).toHaveClass(/charge-plan__demand--unknown/);
+  await expect(suffix).toHaveCount(0);
   await expect(forecast).toContainText("03:15");
 });
 
@@ -553,6 +553,6 @@ test("current discharge forecast remains visible independently of automatic char
   });
   await expect(forecast).toHaveCount(0);
   await expect(panel.locator(".charge-plan__description")).toHaveCount(0);
-  await expect(panel.locator(".charge-plan")).not.toContainText("03:15");
+  await expect(panel.locator(".charge-plan")).toHaveCount(0);
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });

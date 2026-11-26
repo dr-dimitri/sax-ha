@@ -103,7 +103,8 @@ requirement_discharge_forecast:
     Die Attribute observation_minutes, average_discharge_w und observed_at
     liefern die tatsächlich verwendete Beobachtungsdauer, mittlere
     Entladeleistung und den Zeitpunkt der letzten ausgewerteten Messung.
-    REQ-BRIDGE-CHARGE verwendet dieselbe Messgrundlage für die Ladeplanung.
+    REQ-BRIDGE-CHARGE verwendet denselben Entladedurchschnitt. Bei gemeldeten
+    0 % kann die Ladeplanung zusätzlich den am Zähler gemessenen Bedarf nutzen.
   acceptance_criteria:
     - "Vor 60 Sekunden Messverlauf und bei mittlerer Entladeleistung 0 W ist der Sensor unbekannt."
     - "60 Sekunden durchgehend negative Speicherleistung löschen Verlauf und Prognose; kürzere Ladeimpulse nicht."
@@ -169,6 +170,16 @@ requirement_bridge_charge:
     für diese gegebenenfalls begrenzte Menge nicht aus, beginnt dort
     kein Auftrag.
 
+    Meldet der Basic-SOC 0 %, beginnt eine erforderliche Netzladung mit dem
+    ersten erlaubten Tarifabschnitt, der die wirksame Mindestmenge zulässt.
+    Ein bereits offener Abschnitt ist sofort nutzbar. Eine mögliche Teilladung
+    hat bei leerem Speicher Vorrang vor einem späteren längeren Abschnitt.
+    Die genaue Lademenge richtet sich weiterhin nach dem SunSpec-SOC.
+    Bei leerem Speicher lässt sich der ungedeckte Hausverbrauch auch aus
+    frischen, zusammengehörigen Netz- und Speicherleistungswerten ermitteln.
+    Die Ladeplanung mittelt ihn über 1 bis 15 Minuten. Einspeisung zählt mit
+    0 W. Die am Zähler enthaltene Batterieladeleistung wird abgezogen.
+
     domain/bridge_charge.py erhält ausschließlich Daten und ausdrücklich
     erlaubte Ladeintervalle. Die Berechnung kennt weder Home Assistant noch
     eine konkrete Tarifquelle. Sie berücksichtigt nutzbare Energie oberhalb
@@ -177,7 +188,7 @@ requirement_bridge_charge:
     Verbrauch bis PV-Start. Während Netzladung wird der Hausverbrauch direkt
     vom Netz gedeckt; dies verringert ebenfalls den Überbrückungsbedarf.
     Ein Auftrag ist zusammenhängend und endet innerhalb eines erlaubten
-    Intervalls spätestens zum PV-Start. Bei gleicher Bedarfsdeckung haben
+    Intervalls spätestens zum PV-Start. Bei positivem gemeldetem SOC und gleicher Bedarfsdeckung haben
     Kandidaten mit der kürzesten Verspätung gegenüber dem Erreichen des
     SOC-Puffers Vorrang, danach Kandidaten mit voller Mindestlademenge. Danach entscheiden Preis und
     spätester Start. Gegenüber diesem
@@ -186,8 +197,9 @@ requirement_bridge_charge:
     Tarifabschnitts und der für die volle geplante Lademenge benötigte
     Platz im Speicher begrenzen den Vorlauf. Das Ziel-SOC berücksichtigt
     die zum vorgezogenen Start noch vorhandene Energie. Reicht kein Kandidat,
-    ist ein begrenzter Teilauftrag mit größtmöglicher Bedarfsdeckung zulässig;
-    die verbleibende Energiemenge wird ausdrücklich als Fehlbetrag angegeben.
+    ist ein begrenzter Teilauftrag zulässig. Bei positivem SOC entscheidet
+    die größtmögliche Bedarfsdeckung, bei 0 % der früheste nutzbare Start.
+    Die verbleibende Energiemenge wird ausdrücklich als Fehlbetrag angegeben.
     Auch bei zusätzlicher Energie durch die Mindestlademenge zählt eine
     Versorgungslücke vor dem Ladestart zum Fehlbetrag.
 
@@ -343,7 +355,8 @@ requirement_bridge_charge:
   acceptance_criteria:
     - "Dashboard-Schalter und Optionsdialog teilen bridge_charge_enabled; Aktivierung benötigt Tarif und PV-Quelle, Ausschalten bleibt möglich. Bestätigte Zustände, Fehler und fehlende Schreibrechte werden im Dashboard angezeigt."
     - "Ohne aktivierte Option oder eingeschaltete zeitvariable Netzladung erfolgt keine verbrauchsbasierte Netzladung. Aktive Monate begrenzen die erlaubten Intervalle."
-    - "Ohne gültigen zukünftigen PV-Start, frische Batteriewerte oder mindestens eine Minute gültige Entladebeobachtung wird kein neuer Auftrag freigegeben. Fehlende Werte werden nicht geschätzt."
+    - "Ein neuer Auftrag erfordert einen gültigen zukünftigen PV-Start, frische Batteriewerte und mindestens eine Minute gemessenen Verbrauchs. Bei gemeldeten 0 % kann der Netzbezug diesen Verbrauch auch bei stillstehendem Speicher belegen."
+    - "Bei gemessenen 0 % beginnen geplante Voll- und Teilladungen zum ersten nutzbaren Niedertarif. Mindestmenge, Puffer, Obergrenzen, PV-Start und die Prioritäten der Ladesteuerung gelten weiterhin."
     - "Niedertarifintervalle stammen nur aus einem gültigen TIME_OF_USE-Tarif. Änderungen am separaten Netzladezeitfenster verändern keinen verbrauchsabhängigen Plan."
     - "PV-Start erfordert zwei lückenlos folgende 15-Minuten-Intervalle der Gesamtanlagen-Prognose mit ausreichender mittlerer Leistung. Tagesenergiesummen und fremde Sensorquellen sind kein Ersatz."
     - "Bei 0, 45 und 60 Sekunden altem as_of bleiben angenommene Snapshots bis zur nächsten regulären Abfrage nutzbar. Refresh, Timeout und frühere Wiederholungen verlängern keine alte Nutzungsfrist; Vertragsfehler, Quellenwechsel und absolute Altersgrenzen bleiben wirksam."
@@ -862,6 +875,9 @@ requirement_time_of_use_charge_source:
     REQ-ECONOMICS-TARIFFS. Min.-SOC-Startschwelle, Netzlade-Max-SOC,
     globales Max-SOC und aktive Monate gelten weiter für feste SOC-Ladung;
     Bridge ersetzt ausschließlich die Startschwelle durch den Bedarf.
+    Bei gemessenem Basic-SOC von 0 % starten beide Ladeweisen bei bestehender
+    Freigabe zu Beginn des ersten nutzbaren Niedertarifs. Ist das Fenster
+    bereits geöffnet, darf die Ladung beim nächsten Steuerungszyklus beginnen.
     Die alternative Ladeweise ab fester Uhrzeit folgt stattdessen
     REQ-FIXED-TIME-GRID-CHARGE und nutzt keine Tarifpreisfenster.
 
@@ -3755,7 +3771,12 @@ requirement_vue_electricity_tariff:
     ausgeschaltetem Verbrauchsplan erklärt ein neutraler Zusatz den Start:
     "Start im Niedertarif, sobald der Akkustand unter X % fällt" in DE und
     entsprechend in EN. Bei 0 % lautet die Bedingung "bei 0 % Akkustand".
-    Der Zusatz verwendet ausschließlich die bestätigte, verfügbare Startschwelle.
+    Die angezeigte Startschwelle stammt aus der bestätigten, verfügbaren Einstellung.
+    Bei gemessenen 0 % und geplantem Start hat der vom Backend gemeldete
+    Niedertarifbeginn mit Datum und Uhrzeit Vorrang. Im offenen Tarif nennt die
+    Anzeige die erteilte Freigabe, bis der tatsächliche Ladefluss bestätigt ist.
+    Bei Bedarfsplanung nennt der Plan bei 0 % auch für eine Teilladung den
+    leeren Speicher als Grund für den Start zum Niedertarifbeginn.
     Eine verfügbare Entladeprognose bleibt darunter sichtbar.
     In den übrigen Fällen erhält eine fehlende, nicht verfügbare,
     ausgeschaltete oder noch nicht bewertete Planung den orangefarbenen Zusatz

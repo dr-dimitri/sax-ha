@@ -192,6 +192,41 @@ def test_late_tariff_recovers_the_buffer_from_actual_remaining_energy() -> None:
     assert plan.missing_energy_wh == 0
 
 
+@pytest.mark.parametrize(
+    ("minimum_wh", "buffer", "start", "energy"),
+    [(0, 0, 1, 500), (0, 10, 1, 500), (1000, 0, 3, 2000), (1000, 10, 3, 2800)],
+)
+def test_empty_battery_uses_first_window_that_can_deliver_the_minimum(
+    buffer: int, minimum_wh: int, start: int, energy: int
+) -> None:
+    plan = _plan(
+        soc=0,
+        min_soc=0,
+        windows=[_window(3, 7), _window(1, 1.25)],
+        minimum_charge_energy_wh=minimum_wh,
+        soc_buffer=buffer,
+    )
+    assert plan.start == _at(start)
+    assert plan.charge_energy_wh == pytest.approx(energy)
+    assert plan.status == BridgeChargeStatus.INSUFFICIENT
+    assert plan.missing_energy_wh > 0
+
+
+def test_empty_battery_starts_a_capacity_limited_charge_in_the_open_tariff() -> None:
+    # Basic reports 0 %. The more precise SunSpec SOC still limits headroom.
+    plan = _plan(
+        soc=0.4,
+        min_soc=0,
+        max_soc=5,
+        reported_soc=0,
+        windows=[_window(-1, 6)],
+    )
+    assert plan.start == NOW
+    assert plan.charge_energy_wh == pytest.approx(460)
+    assert plan.target_soc == 5
+    assert plan.end == NOW + timedelta(seconds=828)
+
+
 def test_equal_tariff_windows_preserve_the_buffer_when_possible() -> None:
     plan = _plan(
         soc=20,
@@ -514,6 +549,8 @@ def test_invalid_minimum_charge_energy_is_unavailable(invalid: Any) -> None:
     [
         {"soc": 5},
         {"soc": 101},
+        {"reported_soc": -1},
+        {"reported_soc": True},
         {"min_soc": -1},
         {"min_soc": 90},
         {"max_soc": 101},

@@ -247,6 +247,28 @@ it.each(["de", "en"])(
   },
 );
 
+it.each(["de", "en-GB"])(
+  "explains the empty battery start for a scheduled full or partial charge (%s)",
+  async (language) => {
+    const fixture = await mount(language);
+    const empty = { ...planned, empty_battery_start: planned.charge_start };
+    const reason =
+      language === "de" ? "Der Speicher meldet 0 %" : "The battery reports 0%";
+    for (const status of ["planned", "insufficient"]) {
+      await fixture.update(status, empty);
+      expect(fixture.root.textContent).toContain(reason);
+      expect(fixture.root.textContent).toContain("00:00");
+      expect(fixture.root.textContent).toContain("00:40");
+    }
+    for (const status of ["paused", "waiting_for_data", "complete"]) {
+      await fixture.update(status, empty);
+      expect(fixture.root.textContent).not.toContain(reason);
+    }
+    await fixture.update("planned", planned);
+    expect(fixture.root.textContent).not.toContain(reason);
+  },
+);
+
 describe("REQ-FIXED-TIME-GRID-CHARGE: confirmed start in the planning heading", () => {
   it.each(["de", "en-GB"])(
     "shows the saved local time without inactive consumption planning messages (%s)",
@@ -803,8 +825,8 @@ describe("consumption-based charging plan", () => {
     [
       "waiting_for_data",
       "consumption_missing",
-      "Entlademessung",
-      "discharge measurements",
+      "Verbrauchsmesswerten",
+      "consumption measurements",
     ],
     [
       "waiting_for_data",

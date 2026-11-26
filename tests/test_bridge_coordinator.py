@@ -144,6 +144,121 @@ async def test_planned_charge_replaces_min_soc_trigger_and_survives_forecast_res
     )
 
 
+async def test_empty_battery_uses_measured_grid_demand_and_starts_at_tariff_open(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-BRIDGE-CHARGE: an empty, idle battery can plan before the cheap hours."""
+    before = NOW - timedelta(seconds=62)
+    coordinator._timed_charge_max_soc = 5
+    coordinator.options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] = 0
+    coordinator._pv_bridge_forecast.pv_start.return_value = NOW + timedelta(hours=6)
+    coordinator.async_start_sun_charge = (
+        SaxPowerCoordinator.async_start_sun_charge.__get__(coordinator)
+    )
+    coordinator._async_read_basic = AsyncMock(return_value={"soc": 0})
+
+    def read_extended() -> dict[str, Any]:
+        coordinator._high_sample_revision += 1
+        coordinator._high_data = {
+            "battery_soc": 0.4,
+            "battery_soc_min": 0,
+            "battery_capacity": 10000,
+            "ic_max_power_reference": 2000,
+            "storage_power_active": 0,
+            "smartmeter_power": 500,
+        }
+        return coordinator._high_data
+
+    coordinator._async_read_extended = AsyncMock(side_effect=read_extended)
+    for elapsed in range(0, 63, 2):
+        when = before + timedelta(seconds=elapsed)
+        coordinator._high_sample_time = elapsed
+        with (
+            patch(_CLOCK, return_value=elapsed),
+            patch(
+                "custom_components.sax_power.coordinator.dt_util.now", return_value=when
+            ),
+            patch(
+                "custom_components.sax_power.coordinator.dt_util.utcnow",
+                return_value=when,
+            ),
+        ):
+            coordinator.data = await coordinator._async_update_data()
+        data = coordinator.data
+        attributes = data["bridge_charge_plan_attributes"]
+        assert data["discharge_forecast"] is None
+        if elapsed < 60:
+            assert data["bridge_charge_plan"] == "waiting_for_data"
+            assert "empty_battery_start" not in attributes
+        else:
+            assert (
+                attributes["empty_battery_start"]
+                == attributes["charge_start"]
+                == NOW.isoformat()
+            )
+            assert attributes["average_discharge_w"] == 500
+            assert attributes["target_soc"] == 5
+        if when < NOW:
+            coordinator.async_write_extended_register.assert_not_awaited()
+    assert data["bridge_charge_plan"] == "charging"
+    assert [
+        c.args for c in coordinator.async_write_extended_register.await_args_list
+    ] == [
+        (REG_SUN_IC_CONTROL_MODE, SUN_IC_CONTROL_MODE_SETPOINT),
+        (REG_SUN_IC_POWER_SETPOINT_PCT, to_unsigned16(-10000)),
+    ]
+    await coordinator._async_cancel_sun_charge_task()
+
+
+async def test_positive_measured_soc_preserves_later_bridge_start(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    coordinator.options[CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH] = 0
+    coordinator._timed_charge_max_soc = 5
+    coordinator._pv_bridge_forecast.pv_start.return_value = NOW + timedelta(hours=6)
+    data = _data(NOW, soc=1)
+    data["battery_soc_min"] = 0
+    data["battery_soc"] = 0
+    await _evaluate(coordinator, NOW, data)
+    attributes = data["bridge_charge_plan_attributes"]
+    assert "empty_battery_start" not in attributes
+    assert datetime.fromisoformat(attributes["charge_start"]) > NOW
+    coordinator.async_start_sun_charge.assert_not_awaited()
+
+
+@pytest.mark.parametrize("blocked", ["pv", "month", "target", "meter_gap"])
+async def test_empty_battery_respects_bridge_permissions_at_open(
+    coordinator: SaxPowerCoordinator, blocked: str
+) -> None:
+    data = _data(NOW, soc=0, observation=False)
+    data.update(battery_soc_min=0, storage_power_active=0)
+    for elapsed in range(0, 63, 2):
+        coordinator._high_sample_revision += 1
+        coordinator._high_sample_time = elapsed
+        if blocked == "meter_gap" and elapsed == 62:
+            data["smartmeter_power"] = None
+        with (
+            patch(_CLOCK, return_value=elapsed),
+            patch(
+                "custom_components.sax_power.coordinator.dt_util.utcnow",
+                return_value=NOW - timedelta(seconds=62 - elapsed),
+            ),
+        ):
+            coordinator._update_discharge_forecast(data)
+    if blocked == "pv":
+        coordinator._pv_bridge_forecast.pv_start.return_value = None
+    elif blocked == "month":
+        coordinator._timed_charge_months = set()
+    elif blocked == "target":
+        coordinator._timed_charge_max_soc = 0
+    await _evaluate(coordinator, NOW, data)
+    attributes = data["bridge_charge_plan_attributes"]
+    assert "empty_battery_start" not in attributes
+    assert not attributes.get("charge_start")
+    assert not coordinator._timed_charge_active
+    coordinator.async_start_sun_charge.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
     ("initial_soc", "soc_buffer", "minimum_kwh", "minutes"),
     [(15, 0, 1, 30), (25, 20, 0, 10)],

@@ -432,18 +432,29 @@ test("fixed-target charging shows the confirmed low-tariff start rule beside the
   await master.click();
   await expect(master).toBeChecked();
 
-  const publishThreshold = (state: string) =>
-    panel.evaluate((element, state) => {
-      const host = element as HTMLElement & { hass: HomeAssistant };
-      const thresholdId = "number.demo_timed_charge_min_soc";
-      host.hass = {
-        ...host.hass,
-        states: {
-          ...host.hass.states,
-          [thresholdId]: { ...host.hass.states[thresholdId]!, state },
-        },
-      };
-    }, state);
+  const publishThreshold = (
+    state: string,
+    planAttributes: Record<string, unknown> = {},
+  ) =>
+    panel.evaluate(
+      (element, { state, planAttributes }) => {
+        const host = element as HTMLElement & { hass: HomeAssistant };
+        const thresholdId = "number.demo_timed_charge_min_soc";
+        const planId = "sensor.demo_bridge_charge_plan";
+        host.hass = {
+          ...host.hass,
+          states: {
+            ...host.hass.states,
+            [thresholdId]: { ...host.hass.states[thresholdId]!, state },
+            [planId]: {
+              ...host.hass.states[planId]!,
+              attributes: { enabled: false, ...planAttributes },
+            },
+          },
+        };
+      },
+      { state, planAttributes },
+    );
 
   await publishThreshold("10");
   await expect(heading).toHaveText(
@@ -457,6 +468,16 @@ test("fixed-target charging shows the confirmed low-tariff start rule beside the
   );
   const forecast = panel.locator(".charge-plan__forecast");
   await expect(forecast).toContainText("03:15");
+
+  await publishThreshold("10", { empty_battery_start: "2026-09-13T20:00:00Z" });
+  await expect(suffix).toContainText(
+    english ? "start of the low tariff" : "Beginn des Niedertarifs",
+  );
+  await expect(suffix).toContainText("22:00");
+  await publishThreshold("10", { empty_battery_start_due: true });
+  await expect(suffix).toContainText(
+    english ? "current low-tariff period" : "laufenden Niedertarif freigegeben",
+  );
 
   await publishThreshold("0");
   await expect(suffix).toHaveText(

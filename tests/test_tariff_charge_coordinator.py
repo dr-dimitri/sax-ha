@@ -505,6 +505,27 @@ async def test_zero_start_threshold_starts_at_zero_and_continues_to_target(
     assert not coordinator._timed_charge_armed
 
 
+@pytest.mark.parametrize("threshold", [0, 20])
+async def test_measured_empty_fixed_target_plans_and_starts_at_tariff_open(
+    coordinator: SaxPowerCoordinator, threshold: int
+) -> None:
+    """REQ-TIME-OF-USE-CHARGE-SOURCE: preview and first permitted write agree."""
+    coordinator._timed_charge_min_soc = threshold
+    start = NOW.replace(hour=1)
+    await _evaluate(coordinator, start - timedelta(seconds=1), soc=0)
+    assert (
+        coordinator.data["bridge_charge_plan_attributes"]["empty_battery_start"]
+        == start.isoformat()
+    )
+    coordinator.async_start_sun_charge.assert_not_awaited()
+    await _evaluate(coordinator, start, soc=0)
+    assert coordinator.data["bridge_charge_plan_attributes"]["empty_battery_start_due"]
+    coordinator.async_start_sun_charge.assert_awaited_once_with(
+        MIN_SETPOINT_POWER, data=coordinator.data
+    )
+    assert coordinator._tariff_charge_deadline == NOW.replace(hour=6)
+
+
 @pytest.mark.parametrize("blocked", ["off", "month", "window", "target", "global"])
 async def test_zero_threshold_preserves_other_start_conditions(
     coordinator: SaxPowerCoordinator, blocked: str
@@ -525,6 +546,10 @@ async def test_zero_threshold_preserves_other_start_conditions(
     await _evaluate(coordinator, now=now, soc=0)
     assert not coordinator._timed_charge_active
     assert not coordinator._timed_charge_armed
+    attributes = coordinator.data["bridge_charge_plan_attributes"]
+    assert "empty_battery_start_due" not in attributes
+    if blocked != "window":
+        assert "empty_battery_start" not in attributes
     assert all(
         call.args != (MIN_SETPOINT_POWER,)
         for call in coordinator.async_start_sun_charge.await_args_list

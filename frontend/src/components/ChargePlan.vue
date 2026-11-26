@@ -133,6 +133,15 @@ const fixedTargetLabel = computed(() => {
     threshold > 100
   )
     return null;
+  const start = timestamp(attributes.value.empty_battery_start);
+  if (start)
+    return german.value
+      ? `0 % Akkustand – geplanter Start zu Beginn des Niedertarifs am ${start} Uhr`
+      : `0% battery charge – charging is planned for the start of the low tariff on ${start}`;
+  if (attributes.value.empty_battery_start_due === true)
+    return german.value
+      ? "0 % Akkustand – Netzladung im laufenden Niedertarif freigegeben"
+      : "0% battery charge – grid charging is enabled in the current low-tariff period";
   if (threshold === 0)
     return german.value
       ? "Start im Niedertarif bei 0 % Akkustand"
@@ -147,7 +156,7 @@ const reasons = computed<Record<string, string>>(() =>
         pv_start_missing:
           "Die gewählte PV-Prognose liefert noch keinen Zeitraum, der den Verbrauch mindestens 30 Minuten lang deckt. Bitte die PV-Prognosequelle unter „Preise & Zeiten“ prüfen.",
         consumption_missing:
-          "Für die Verbrauchsprognose wird mindestens eine Minute Entlademessung benötigt.",
+          "Für die Verbrauchsprognose wird mindestens eine Minute mit gültigen Verbrauchsmesswerten benötigt.",
         measurements_missing: "Aktuelle Batteriemesswerte fehlen.",
         calibration: "Die Batteriekalibrierung hat Vorrang.",
         pv_surplus: "PV-Überschuss pausiert die geplante Netzladung.",
@@ -157,7 +166,7 @@ const reasons = computed<Record<string, string>>(() =>
         pv_start_missing:
           "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast source under “Prices & times”.",
         consumption_missing:
-          "The consumption forecast needs at least one minute of discharge measurements.",
+          "The consumption forecast needs at least one minute of valid consumption measurements.",
         measurements_missing: "Current battery measurements are missing.",
         calibration: "Battery calibration takes priority.",
         pv_surplus: "PV surplus pauses planned grid charging.",
@@ -378,6 +387,14 @@ const assessment = computed(() => {
     : `Assessed at ${at} using current battery measurements.`;
 });
 const forecast = computed(() => {
+  if (
+    ["planned", "insufficient"].includes(status.value ?? "") &&
+    !completed.value &&
+    timestamp(attributes.value.empty_battery_start)
+  )
+    return german.value
+      ? "Der Speicher meldet 0 %. Die Netzladung ist ab Beginn des Niedertarifs geplant."
+      : "The battery reports 0%. Grid charging is planned from the start of the low-tariff period.";
   // REQ-VUE-ELECTRICITY-TARIFF: prefer live observations without repeating
   // the plan's retained consumption basis during the same description.
   if (currentForecast.value) return null;

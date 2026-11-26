@@ -388,6 +388,15 @@ Mindestlademenge sein, gegebenenfalls begrenzt durch den verfügbaren Platz bis
 zur SOC-Obergrenze. Die gemeinsame Tarifquelle gilt auch für feste SOC-Ladung.
 Bei Verbrauchsplanung blendet das Dashboard die Min.-SOC-Startschwelle aus.
 
+Meldet der Speicher **0 % Akkustand**, beginnt die Netzladung bei **Festes
+Netzladeziel** und **Nur Bedarf bis Solarstrom** mit dem ersten nutzbaren
+Niedertarif. Ist der Niedertarif bereits aktiv, kann die Ladung sofort
+beginnen. Die **Ladeplanung** zeigt den vorgesehenen Start an. Bei **Nur
+Bedarf bis Solarstrom** kann sie den Hausverbrauch auch dann aus dem
+gemessenen Netzbezug bestimmen, wenn der leere Speicher bereits stillsteht.
+Die Bedarfsplanung berücksichtigt weiterhin Mindestlademenge, SOC-Puffer,
+Ladegrenzen und PV-Prognose.
+
 Wähle in den Integrationsoptionen als **PV-Prognose-Sensor** einen Sensor deiner
 Integration `pv_forecast`. Die Ladeplanung liest darüber die 15-Minuten-Prognose
 der gesamten PV-Anlage. Als PV-Start gilt der Beginn von mindestens zwei

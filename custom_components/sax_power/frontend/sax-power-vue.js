@@ -4864,17 +4864,19 @@ var Ds = ["aria-busy"], Os = { class: "time-window-control__inputs" }, ks = ["fo
 			let e = n?.tariff.value;
 			if (!t.automatic || e?.tariff_type !== "time_of_use" || e.fixed_time_charging?.enabled || p.value !== "off" || !o.value?.available || o.value.state?.state !== "off") return null;
 			let r = n?.entity("number", "timed_charge_min_soc"), a = r?.available ? Q(r.state?.state) : null;
-			return a === null || !Number.isInteger(a) || a < 0 || a > 100 ? null : a === 0 ? i.value ? "Start im Niedertarif bei 0 % Akkustand" : "Starts during low-tariff hours at 0% battery charge" : i.value ? `Start im Niedertarif, sobald der Akkustand unter ${a} % fällt` : `Starts during low-tariff hours when the battery falls below ${a}%`;
+			if (a === null || !Number.isInteger(a) || a < 0 || a > 100) return null;
+			let c = y(s.value.empty_battery_start);
+			return c ? i.value ? `0 % Akkustand – geplanter Start zu Beginn des Niedertarifs am ${c} Uhr` : `0% battery charge – charging is planned for the start of the low tariff on ${c}` : s.value.empty_battery_start_due === !0 ? i.value ? "0 % Akkustand – Netzladung im laufenden Niedertarif freigegeben" : "0% battery charge – grid charging is enabled in the current low-tariff period" : a === 0 ? i.value ? "Start im Niedertarif bei 0 % Akkustand" : "Starts during low-tariff hours at 0% battery charge" : i.value ? `Start im Niedertarif, sobald der Akkustand unter ${a} % fällt` : `Starts during low-tariff hours when the battery falls below ${a}%`;
 		}), g = Z(() => i.value ? {
 			pv_start_missing: "Die gewählte PV-Prognose liefert noch keinen Zeitraum, der den Verbrauch mindestens 30 Minuten lang deckt. Bitte die PV-Prognosequelle unter „Preise & Zeiten“ prüfen.",
-			consumption_missing: "Für die Verbrauchsprognose wird mindestens eine Minute Entlademessung benötigt.",
+			consumption_missing: "Für die Verbrauchsprognose wird mindestens eine Minute mit gültigen Verbrauchsmesswerten benötigt.",
 			measurements_missing: "Aktuelle Batteriemesswerte fehlen.",
 			calibration: "Die Batteriekalibrierung hat Vorrang.",
 			pv_surplus: "PV-Überschuss pausiert die geplante Netzladung.",
 			manual_charge: "Die manuelle Ladung hat Vorrang."
 		} : {
 			pv_start_missing: "The selected PV forecast does not yet provide a period covering consumption for at least 30 minutes. Check the PV forecast source under “Prices & times”.",
-			consumption_missing: "The consumption forecast needs at least one minute of discharge measurements.",
+			consumption_missing: "The consumption forecast needs at least one minute of valid consumption measurements.",
 			measurements_missing: "Current battery measurements are missing.",
 			calibration: "Battery calibration takes priority.",
 			pv_surplus: "PV surplus pauses planned grid charging.",
@@ -4963,6 +4965,7 @@ var Ds = ["aria-busy"], Os = { class: "time-window-control__inputs" }, ks = ["fo
 			let e = y(s.value.completion_evaluated_at);
 			return !T.value || !e ? null : i.value ? `Bewertet am ${e} Uhr anhand aktueller Batteriemesswerte.` : `Assessed at ${e} using current battery measurements.`;
 		}), te = Z(() => {
+			if (["planned", "insufficient"].includes(p.value ?? "") && !T.value && y(s.value.empty_battery_start)) return i.value ? "Der Speicher meldet 0 %. Die Netzladung ist ab Beginn des Niedertarifs geplant." : "The battery reports 0%. Grid charging is planned from the start of the low-tariff period.";
 			if (C.value) return null;
 			let e = v(s.value.observation_minutes, 1, 15, 0);
 			if (!e || !w.value.discharge) return null;

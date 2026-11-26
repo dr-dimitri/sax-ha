@@ -1107,7 +1107,13 @@ für den geplanten Energiezuwachs im Speicher. Die Planung verwendet Wh.
 Der freie Platz bis zum effektiven Netzlade-Max-SOC begrenzt diese Mindestmenge.
 Ist der Tarifabschnitt bis zum PV-Start für die gegebenenfalls begrenzte
 Mindestmenge zu kurz, gibt die Domain ihn nicht zum Laden frei.
-Ein Auftrag ist zusammenhängend. Bei gleicher Bedarfsdeckung bevorzugt die
+Der Basic-SOC von 0 % setzt für beide tarifgebundenen Ladeweisen den Start
+auf den Beginn des ersten nutzbaren Fensters. SunSpec-SOC und Kapazität
+bestimmen weiterhin die Lademenge. Für den leeren Speicher beobachtet der
+Coordinator den ungedeckten Hausverbrauch aus Zähler- und Speicherleistung
+mit derselben Zeitgewichtung und Lückenerkennung wie die Entladeprognose.
+Damit liefert auch ein stillstehender Speicher eine belastbare Bedarfsbasis.
+Ein Auftrag ist zusammenhängend. Bei positivem SOC und gleicher Bedarfsdeckung bevorzugt die
 Planung einen Start vor dem Unterschreiten des Puffers oder die kürzeste
 Verspätung. Danach haben Aufträge mit voller Mindestlademenge Vorrang.
 Anschließend entscheiden der günstigste Tarifabschnitt
@@ -1117,8 +1123,8 @@ Der Start liegt im Tarifabschnitt und setzt genug freie Kapazität für die
 geplante Lademenge voraus. Bei gesetztem Puffer nutzt ein Teilauftrag den
 freien Platz beim Erreichen des Puffers oder beim späteren Tarifbeginn.
 Das Ziel-SOC folgt aus der Restenergie zu diesem
-Start und der geplanten Lademenge. Reicht kein Kandidat aus, wählt die Domain
-die größte mögliche Bedarfsdeckung und weist den verbleibenden Fehlbetrag aus.
+Start und der geplanten Lademenge. Reicht kein Kandidat aus, weist die Domain
+den verbleibenden Fehlbetrag des gewählten Teilauftrags aus.
 Eine Versorgungslücke vor dem Ladestart zählt zum Fehlbetrag.
 
 `application/bridge_inputs.py` adaptiert ausschließlich die tatsächlich

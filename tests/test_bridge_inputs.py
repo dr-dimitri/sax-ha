@@ -8,7 +8,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from custom_components.sax_power.application.bridge_inputs import charge_windows
+from custom_components.sax_power.application.bridge_inputs import (
+    charge_windows,
+    empty_battery_consumption_power,
+)
 from custom_components.sax_power.domain.bridge_charge import ChargeWindow
 from custom_components.sax_power.domain.tariff import (
     DailyPriceWindow,
@@ -20,6 +23,25 @@ from custom_components.sax_power.domain.tariff import (
 BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 13, 22, tzinfo=BERLIN)
 MONTHS = frozenset(range(1, 13))
+
+
+@pytest.mark.parametrize(
+    ("storage", "meter", "expected"),
+    [
+        (0, 350, 350),
+        (30, 350, 380),
+        (0, -100, 0),
+        (-400, 750, 350),
+        (-400, 400, 0),
+        (0, None, None),
+        (float("nan"), 350, None),
+        (0, False, None),
+    ],
+)
+def test_empty_battery_observation_excludes_export_and_grid_charging(
+    storage: float, meter: float | None, expected: float | None
+) -> None:
+    assert empty_battery_consumption_power(storage, meter) == expected
 
 
 def _moment(value: str) -> datetime:

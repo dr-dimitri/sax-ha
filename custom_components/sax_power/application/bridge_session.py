@@ -226,6 +226,9 @@ class BridgeChargeSession:
         self.completed_at = None
         self._completion_pending = False
         self._pv_start = pv_start
+        # Both tariff modes use the displayed Basic SOC as the start signal.
+        # SunSpec SOC retains its precision for energy and headroom.
+        reported_soc = data.get("soc", data.get("battery_soc"))
         self.plan = plan_bridge_charge(
             now=now,
             pv_start=pv_start,
@@ -238,6 +241,7 @@ class BridgeChargeSession:
             windows=windows,
             minimum_charge_energy_wh=minimum_charge_energy_wh,
             soc_buffer=soc_buffer,
+            reported_soc=reported_soc,
         )
         plan = self.plan
         self.status = (
@@ -266,6 +270,8 @@ class BridgeChargeSession:
             ),
             "reason": plan.reason,
         }
+        if reported_soc == 0 and plan.start is not None:
+            self.attributes["empty_battery_start"] = plan.start.isoformat()
         return (
             plan.start is not None
             and plan.end is not None

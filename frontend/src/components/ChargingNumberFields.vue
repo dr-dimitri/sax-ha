@@ -12,7 +12,7 @@ import {
 import { SAX_DASHBOARD_KEY, type DashboardEntity } from "../ha";
 import { finiteValue } from "../savings";
 
-type Field = { key: string; label: string };
+type Field = { key: string; label: string; hint?: string };
 type LocalError = "invalid" | "order" | "failed" | "unavailable" | "readonly";
 type Draft = {
   entityId: string | null;
@@ -87,7 +87,7 @@ function changed(key: string): boolean {
 }
 function attribute(
   key: string,
-  name: "min" | "max" | "step",
+  name: "min" | "max" | "step" | "min_positive",
 ): number | undefined {
   if (key === "timed_charge_max_soc" && name === "max") {
     const globalDraft = props.fields.some((field) => field.key === "max_soc")
@@ -230,6 +230,7 @@ function prepare(): Record<string, number> | null {
       return invalid(key, "readonly");
     const value = numeric(drafts[key]?.value ?? "");
     const min = attribute(key, "min");
+    const minPositive = attribute(key, "min_positive");
     const max = attribute(key, "max");
     const step = attribute(key, "step");
     if (
@@ -241,6 +242,7 @@ function prepare(): Record<string, number> | null {
       step <= 0 ||
       min > max ||
       value < min ||
+      (value > 0 && minPositive !== undefined && value < minPositive) ||
       (value > max && (key !== "timed_charge_max_soc" || changed(key))) ||
       !Number.isFinite((value - min) / step) ||
       Math.abs((value - min) / step - Math.round((value - min) / step)) > 1e-7
@@ -341,6 +343,13 @@ defineExpose({ submit, prepare, reset, pending });
         <p :id="`${id}-${field.key}-value`" class="entity-control__value">
           {{ entity(field.key)?.displayValue ?? text.unavailable }}
         </p>
+        <p
+          v-if="field.hint"
+          :id="`${id}-${field.key}-hint`"
+          class="entity-control__value"
+        >
+          {{ field.hint }}
+        </p>
       </div>
       <div class="entity-control__input">
         <input
@@ -352,7 +361,15 @@ defineExpose({ submit, prepare, reset, pending });
           :max="attribute(field.key, 'max')"
           :step="attribute(field.key, 'step')"
           :disabled="blocked(field.key)"
-          :aria-describedby="`${id}-${field.key}-value ${id}-${field.key}-status`"
+          :aria-describedby="
+            [
+              `${id}-${field.key}-value`,
+              field.hint && `${id}-${field.key}-hint`,
+              `${id}-${field.key}-status`,
+            ]
+              .filter(Boolean)
+              .join(' ')
+          "
           :aria-invalid="!!error(field.key)"
           required
           @input="edit(field.key, $event)"

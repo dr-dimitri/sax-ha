@@ -399,7 +399,10 @@ const chargingFeedback = computed(() => {
           ["number", "timed_charge_max_soc"],
           ["number", "timed_charge_min_soc"],
           ...(bridgeSelected
-            ? [["number", "bridge_charge_min_energy_kwh"] as const]
+            ? [
+                ["number", "bridge_charge_min_energy_kwh"] as const,
+                ["number", "bridge_charge_soc_buffer"] as const,
+              ]
             : []),
           ["switch", "bridge_charge_enabled"],
           ...months.map((key): ["switch", string] => ["switch", key]),

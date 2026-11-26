@@ -11,6 +11,7 @@ from ..domain.bridge_charge import (
     DEFAULT_MIN_BRIDGE_CHARGE_ENERGY_WH,
     BridgeChargePlan,
     ChargeWindow,
+    energy_above_buffer_wh,
     plan_bridge_charge,
 )
 from ..domain.discharge_forecast import MAX_OBSERVATION_MINUTES
@@ -157,9 +158,12 @@ class BridgeChargeSession:
             self.attributes["average_discharge_w"]
             * max(0.0, (self._pv_start - now).total_seconds())
             / 3600
-            - data["battery_capacity"]
-            * max(0.0, data["battery_soc"] - data["battery_soc_min"])
-            / 100,
+            - energy_above_buffer_wh(
+                data["battery_capacity"],
+                data["battery_soc"],
+                data["battery_soc_min"],
+                self.attributes["soc_buffer"],
+            ),
         )
         self._completion_pending = False
         self.attributes["shortfall_kwh"] = remaining / 1000
@@ -178,6 +182,7 @@ class BridgeChargeSession:
         windows: Sequence[ChargeWindow],
         fingerprint: object,
         minimum_charge_energy_wh: float = DEFAULT_MIN_BRIDGE_CHARGE_ENERGY_WH,
+        soc_buffer: float = 0,
     ) -> bool:
         """Return whether an existing or newly computed bounded charge is due."""
         now = now.astimezone(UTC)
@@ -232,12 +237,19 @@ class BridgeChargeSession:
             charge_power_w=data.get("ic_max_power_reference"),
             windows=windows,
             minimum_charge_energy_wh=minimum_charge_energy_wh,
+            soc_buffer=soc_buffer,
         )
         plan = self.plan
         self.status = (
             "waiting_for_data" if plan.status == "unavailable" else plan.status
         )
         self.attributes = {
+            "soc_buffer": soc_buffer,
+            "charge_energy_kwh": (
+                plan.charge_energy_wh / 1000
+                if plan.charge_energy_wh is not None
+                else None
+            ),
             "observation_minutes": minutes,
             "average_discharge_w": average,
             "discharge_at": (

@@ -16,6 +16,7 @@ from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 from custom_components.sax_power import PLATFORMS, config_flow
 from custom_components.sax_power.const import (
     CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
+    CONF_BRIDGE_CHARGE_SOC_BUFFER,
     CONF_ECONOMICS_FEED_IN_PRICE,
     CONF_ECONOMICS_FIXED_IMPORT_PRICE,
     CONF_ECONOMICS_INVESTMENT_COST,
@@ -840,7 +841,10 @@ async def test_options_flow_is_prefilled_with_current_options(hass) -> None:
     assert suggested[CONF_PRICE_SENSOR] == "sensor.strompreis"
 
 
-async def test_options_flow_round_trips_the_bridge_minimum(hass: HomeAssistant) -> None:
+@pytest.mark.parametrize("minimum", [0, 1.7])
+async def test_options_flow_round_trips_the_bridge_minimum(
+    hass: HomeAssistant, minimum: float
+) -> None:
     """REQ-BRIDGE-CHARGE: The options form edits the stored energy in kWh."""
     entry = _economics_entry(hass)
     key = CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH
@@ -852,27 +856,38 @@ async def test_options_flow_round_trips_the_bridge_minimum(hass: HomeAssistant) 
         field["description"]["suggested_value"] == DEFAULT_BRIDGE_CHARGE_MIN_ENERGY_KWH
     )
     assert field["selector"]["number"] == {
-        "min": 0.5,
+        "min": 0,
         "max": 100.0,
         "step": 0.1,
         "mode": "box",
         "unit_of_measurement": "kWh",
     }
 
+    buffer = next(
+        item
+        for item in front_end["data_schema"]
+        if item["name"] == CONF_BRIDGE_CHARGE_SOC_BUFFER
+    )
+    assert buffer["description"]["suggested_value"] == 0
+    assert buffer["selector"]["number"] == {
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "mode": "box",
+        "unit_of_measurement": "%",
+    }
+    values = {key: minimum, CONF_BRIDGE_CHARGE_SOC_BUFFER: 10}
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {key: 1.7}
+        result["flow_id"], values
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert entry.options[key] == 1.7
+    assert values.items() <= entry.options.items()
     reopened = await hass.config_entries.options.async_init(entry.entry_id)
-    assert (
-        next(
-            marker.description["suggested_value"]
-            for marker in reopened["data_schema"].schema
-            if marker.schema == key
-        )
-        == 1.7
-    )
+    assert {
+        marker.schema: marker.description["suggested_value"]
+        for marker in reopened["data_schema"].schema
+        if marker.schema in values
+    } == values
 
 
 @pytest.mark.parametrize("invalid", [0.4, 100.1, 1.25, True, "1.7", float("nan")])
@@ -898,23 +913,60 @@ async def test_options_flow_preserves_newer_bridge_minimum_if_left_unedited(
 ) -> None:
     """REQ-BRIDGE-CHARGE: Other settings can be edited without reverting the number."""
     key = CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH
-    entry = _economics_entry(hass, {key: 1.7})
+    entry = _economics_entry(hass, {key: 1.7, CONF_BRIDGE_CHARGE_SOC_BUFFER: 8})
     result = await hass.config_entries.options.async_init(entry.entry_id)
     first_page = {CONF_ECONOMICS_TARIFF_TYPE: TariffType.FIXED.value}
     if submit_opening_value:
         first_page[key] = 1.7
+        first_page[CONF_BRIDGE_CHARGE_SOC_BUFFER] = 8
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], first_page
     )
     assert result["step_id"] == "economics_fixed"
-    hass.config_entries.async_update_entry(entry, options={**entry.options, key: 2.3})
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, key: 0, CONF_BRIDGE_CHARGE_SOC_BUFFER: 10}
+    )
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {CONF_ECONOMICS_FEED_IN_PRICE: 8, CONF_ECONOMICS_FIXED_IMPORT_PRICE: 30},
     )
     assert result["type"] == FlowResultType.CREATE_ENTRY
-    assert entry.options[key] == 2.3
+    assert entry.options[key] == 0
+    assert entry.options[CONF_BRIDGE_CHARGE_SOC_BUFFER] == 10
+
+
+@pytest.mark.parametrize("invalid", [-1, 101, 1.5, True, "10", float("nan")])
+async def test_options_flow_rejects_invalid_soc_buffer(
+    hass: HomeAssistant, invalid: object
+) -> None:
+    key = CONF_BRIDGE_CHARGE_SOC_BUFFER
+    entry = _economics_entry(hass, {key: 10})
+    form = await hass.config_entries.options.async_init(entry.entry_id)
+    with pytest.raises(InvalidData) as raised:
+        await hass.config_entries.options.async_configure(
+            form["flow_id"], {key: invalid}
+        )
+    assert key in raised.value.schema_errors
+    assert entry.options[key] == 10
+
+
+async def test_options_flow_accepts_bridge_settings_on_initial_submission(
+    hass: HomeAssistant,
+) -> None:
+    entry = _economics_entry(hass)
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.options.async_init(
+            entry.entry_id, data={CONF_BRIDGE_CHARGE_SOC_BUFFER: -1}
+        )
+    assert CONF_BRIDGE_CHARGE_SOC_BUFFER not in entry.options
+    values = {CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: 0, CONF_BRIDGE_CHARGE_SOC_BUFFER: 10}
+    result = await hass.config_entries.options.async_init(
+        entry.entry_id,
+        data={CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value, **values},
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert values.items() <= entry.options.items()
 
 
 # --------------------------------------------------------------------------

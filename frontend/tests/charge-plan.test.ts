@@ -211,6 +211,42 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+it.each(["de", "en"])(
+  "shows demand-based energy and the confirmed reserve when the minimum is zero (%s)",
+  async (language) => {
+    const fixture = await mount(language);
+    const german = language === "de";
+    const settings = {
+      enabled: true,
+      minimum_charge_energy_kwh: 0,
+      soc_buffer: 10,
+    };
+    await fixture.update("planned", {
+      ...planned,
+      ...settings,
+      charge_energy_kwh: 0.32,
+    });
+    expect(fixture.root.textContent).toContain(
+      german ? "Keine Mindestlademenge" : "No minimum charge",
+    );
+    expect(fixture.root.textContent).toContain(
+      german ? "0,32 kWh Netzladung" : "0.32 kWh",
+    );
+    expect(fixture.root.textContent).toContain(
+      german ? "10 % SOC als Puffer" : "10% SOC buffer",
+    );
+    await fixture.update("not_needed", { ...settings, charge_energy_kwh: 0 });
+    expect(fixture.root.querySelector("h2")?.textContent).toContain(
+      german ? "Keine Ladung nötig" : "No charging needed",
+    );
+    expect(fixture.root.textContent).not.toContain("0,00 kWh");
+    await fixture.update("off", { enabled: false });
+    expect(fixture.root.textContent).not.toContain(
+      german ? "Puffer" : "buffer",
+    );
+  },
+);
+
 describe("REQ-FIXED-TIME-GRID-CHARGE: confirmed start in the planning heading", () => {
   it.each(["de", "en-GB"])(
     "shows the saved local time without inactive consumption planning messages (%s)",

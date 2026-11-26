@@ -18,6 +18,9 @@ const control = computed(() =>
   dashboard?.entity("switch", "bridge_charge_enabled"),
 );
 const attributes = computed(() => plan.value?.state?.attributes ?? {});
+const socBuffer = computed(() =>
+  number(attributes.value.soc_buffer, 1, 100, 0),
+);
 const fixedTimeStart = computed(() => {
   const fixed = dashboard?.tariff.value?.fixed_time_charging;
   if (!fixed?.enabled || !fixed.start || timeSeconds(fixed.start) === null)
@@ -65,6 +68,10 @@ const text = computed(() =>
           "Die geplante Netzladung ist beendet. Für die Abschlussbewertung fehlen aktuelle Batteriemesswerte; die Fehlmenge ist noch unbekannt.",
         completedInsufficient:
           "Die geplante Netzladung ist beendet. Die verbleibende Speicherenergie reicht voraussichtlich nicht bis zum geplanten PV-Start.",
+        insufficientBuffer:
+          "Die mögliche Netzladung reicht voraussichtlich nicht aus, um den Verbrauch bis zum PV-Start zu decken und den SOC-Puffer zu halten.",
+        completedInsufficientBuffer:
+          "Die Netzladung ist beendet. Die verbleibende Energie reicht voraussichtlich nicht für den Verbrauch bis zum PV-Start und den SOC-Puffer.",
         not_needed: "Eine Netzladung ist derzeit nicht erforderlich.",
         insufficient:
           "Die mögliche Netzladung reicht voraussichtlich nicht aus, um die Zeit bis zum PV-Start vollständig zu überbrücken.",
@@ -89,6 +96,10 @@ const text = computed(() =>
           "The planned grid charging has ended. Completion assessment needs current battery measurements; the shortfall is still unknown.",
         completedInsufficient:
           "The planned grid charging has ended. The remaining battery energy is not expected to last until the planned PV start.",
+        insufficientBuffer:
+          "The available grid charging is unlikely to cover consumption and preserve the SOC buffer until solar production starts.",
+        completedInsufficientBuffer:
+          "Grid charging has ended. The remaining energy is unlikely to cover consumption and preserve the SOC buffer until solar production starts.",
         not_needed: "No grid charging is currently needed.",
         insufficient:
           "The available grid charging is not expected to cover the entire period until PV starts.",
@@ -440,7 +451,11 @@ const paragraphs = computed(() => {
           : ` Expected shortfall: ${shortfall} kWh.`
         : "";
       if (completed.value) {
-        return [text.value.completedInsufficient + shortage];
+        return [
+          (socBuffer.value
+            ? text.value.completedInsufficientBuffer
+            : text.value.completedInsufficient) + shortage,
+        ];
       }
       const partial =
         start && end
@@ -459,7 +474,9 @@ const paragraphs = computed(() => {
         : null;
       return [
         forecast.value,
-        text.value.insufficient + shortage,
+        (socBuffer.value
+          ? text.value.insufficientBuffer
+          : text.value.insufficient) + shortage,
         partial,
         horizon,
       ];
@@ -485,6 +502,53 @@ const description = computed(() =>
     ? chargingDescription.value
     : [currentForecast.value, ...paragraphs.value].filter(Boolean).join(" "),
 );
+const bridgeSettings = computed(() => {
+  if (!plan.value?.available || attributes.value.enabled !== true) return "";
+  const minimum = attributes.value.minimum_charge_energy_kwh;
+  const minimumKwh = number(minimum, 0, 100);
+  const parts: string[] = [];
+  if (minimumKwh) {
+    if (finiteValue(minimum) === 0)
+      parts.push(
+        german.value
+          ? "Keine Mindestlademenge. Die Netzladung richtet sich nach dem berechneten Bedarf."
+          : "No minimum charge. Grid charging follows the calculated demand.",
+      );
+    else
+      parts.push(
+        german.value
+          ? `Die Mindestlademenge beträgt ${minimumKwh} kWh.`
+          : `The minimum charge is ${minimumKwh} kWh.`,
+      );
+  }
+  if (socBuffer.value)
+    parts.push(
+      german.value
+        ? `Bis zum PV-Start sollen ${socBuffer.value} % SOC als Puffer bleiben.`
+        : `The plan aims to retain a ${socBuffer.value}% SOC buffer until solar production starts.`,
+    );
+  return parts.join(" ");
+});
+const plannedEnergy = computed(() => {
+  const kwh = finiteValue(attributes.value.charge_energy_kwh);
+  if (
+    kwh === null ||
+    kwh <= 0 ||
+    completed.value ||
+    !["planned", "charging", "insufficient", "paused"].includes(
+      status.value ?? "",
+    )
+  )
+    return null;
+  if (kwh < 0.01)
+    return german.value
+      ? "Geplant sind weniger als 0,01 kWh."
+      : "The planned charge is less than 0.01 kWh.";
+  const energy = formatSavingsNumber(kwh, props.hass, 2);
+  return german.value
+    ? `Geplant sind ${energy} kWh Netzladung.`
+    : `The planned grid charge is ${energy} kWh.`;
+});
 const target = computed(() => {
   if (
     chargingActive.value ||
@@ -530,6 +594,8 @@ const target = computed(() => {
       </p>
       <p v-if="dataGap">{{ dataGap }}</p>
       <p v-if="assessment">{{ assessment }}</p>
+      <p v-if="bridgeSettings">{{ bridgeSettings }}</p>
+      <p v-if="plannedEnergy">{{ plannedEnergy }}</p>
       <p v-if="target" class="charge-plan__target">{{ target }}</p>
     </template>
   </section>

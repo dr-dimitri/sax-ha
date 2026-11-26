@@ -149,11 +149,21 @@ requirement_bridge_charge:
     weiterhin das Ziel. Ohne Bedarf findet keine geplante Netzladung statt.
     Bei Bedarf beträgt der geplante Energiezuwachs im Speicher mindestens
     bridge_charge_min_energy_kwh. Der Standardwert ist 1,0 kWh und gilt auch
-    ohne vorhandenen Eintrag. Zulässig sind 0,5 bis 100 kWh in 0,1-kWh-Schritten.
-    Das Dashboard bietet die Einstellung neben dem maximalen Netzladeziel
-    für diese Ladeweise an. Number-Entity und Optionsdialog lesen und speichern
-    dieselbe Config-Entry-Option. Das Dashboard validiert und speichert den
-    Wert gemeinsam mit den SOC-Einstellungen über set_charging_settings.
+    ohne vorhandenen Eintrag. 0 kWh deaktiviert die Mindestmenge und ihre
+    Verlängerung am geplanten Ladeende. Positive Mindestmengen liegen bei
+    0,5 bis 100 kWh in 0,1-kWh-Schritten. bridge_charge_soc_buffer ist die
+    gewünschte absolute SOC-Reserve bis PV-Start, einstellbar von 0 bis 100 %
+    in ganzen Prozentpunkten, standardmäßig 0 %. Die höhere Grenze aus Puffer
+    und Geräte-Minimal-SOC bestimmt den Bedarf. Unterhalb des Puffers zählt
+    auch die Energie zum Wiederauffüllen. Ladebeginn und Ziel verwenden den
+    tatsächlichen Akkustand und den verfügbaren Platz. Der Start orientiert
+    sich am erwarteten Erreichen des Puffers und den erlaubten Tarifzeiten.
+    Ist dort nur Platz für eine Teilladung, wird dieser bereits verfügbare
+    Platz genutzt. Der verbleibende Bedarf wird als Fehlbetrag ausgewiesen.
+    Beide Werte sind neben dem maximalen Netzladeziel einstellbar.
+    Number-Entities und Optionsdialog lesen und speichern dieselben
+    Config-Entry-Optionen. Das Dashboard validiert und speichert die Werte
+    gemeinsam mit den SOC-Einstellungen über set_charging_settings.
     Der freie Platz bis zum wirksamen Netzladen Max. SOC begrenzt
     die Mindestlademenge. Reicht die Zeit im Tarifabschnitt bis PV-Start
     für diese gegebenenfalls begrenzte Menge nicht aus, beginnt dort
@@ -168,7 +178,8 @@ requirement_bridge_charge:
     vom Netz gedeckt; dies verringert ebenfalls den Überbrückungsbedarf.
     Ein Auftrag ist zusammenhängend und endet innerhalb eines erlaubten
     Intervalls spätestens zum PV-Start. Bei gleicher Bedarfsdeckung haben
-    Kandidaten mit voller Mindestlademenge Vorrang. Danach entscheiden Preis und
+    Kandidaten mit der kürzesten Verspätung gegenüber dem Erreichen des
+    SOC-Puffers Vorrang, danach Kandidaten mit voller Mindestlademenge. Danach entscheiden Preis und
     spätester Start. Gegenüber diesem
     spätesten Start zieht die Planung den gesamten Ladeblock um bis zu
     zehn Minuten vor. Die aktuelle Uhrzeit, der Beginn des erlaubten
@@ -250,7 +261,7 @@ requirement_bridge_charge:
     Auch bei einer Datenlücke durchläuft er dieselbe Abschlussbewertung:
     Der Restbedarf bis zum im Plan gebundenen PV-Start wird aus dessen
     eingefrorenem Entladedurchschnitt und der aktuell gemessenen nutzbaren
-    Batterieenergie berechnet. Bei mehr als 1 Wh Restbedarf lautet das
+    Batterieenergie unter Berücksichtigung des Puffers berechnet. Bei mehr als 1 Wh Restbedarf lautet das
     Ergebnis insufficient mit reason=charge_shortfall, andernfalls complete.
     Fehlender PV-Start aus der aktuellen Prognose verhindert diese Bewertung
     nicht. Fehlen frische, gültige Batterie-SOC-, Mindest-SOC- oder
@@ -312,6 +323,8 @@ requirement_bridge_charge:
     PV-Start wird der aktuelle Bedarf bewertet. Ohne diese Grundlage ist
     der Anzeigestatus unknown. Die historische Abschlussbewertung bleibt
     davon unberührt; neue physische Aufträge behalten ihre bestehende Sperre.
+    Die aktuelle Bedarfsbewertung berücksichtigt den SOC-Puffer. Der angezeigte
+    Entladezeitpunkt bezieht sich auf die Geräteuntergrenze.
     Bedarf und angezeigter Entladezeitpunkt verwenden dieselbe aktuelle
     HIGH-Kapazität, denselben SOC und Verbrauchsdurchschnitt. Ein früherer
     Veröffentlichungs-Snapshot darf weder Ladefluss noch Entladezeit vortäuschen.
@@ -320,7 +333,10 @@ requirement_bridge_charge:
     zeitvariablen Tab daraus eine verständliche Meldung mit Verbrauchsbasis,
     erwartetem Entladezeitpunkt, Niedertarif-Ladestart, Ladeende und PV-Start
     zusammen. Kein Ladebedarf, fehlende Eingangsdaten, Pause und ein
-    verbleibender Fehlbetrag werden ausdrücklich benannt. Die bestehenden
+    verbleibender Fehlbetrag werden ausdrücklich benannt. Die Karte zeigt
+    die geplante Speicherlademenge (charge_energy_kwh), die Mindestmenge
+    (minimum_charge_energy_kwh) und einen gesetzten SOC-Puffer (soc_buffer).
+    Bei 0 kWh weist sie die reine Bedarfsladung ohne Mindestmenge aus. Die bestehenden
     Strategien und Schreibpfade des dynamischen Tarifs werden nicht durch
     diese Betriebsart ersetzt; die reine Planung ist für deren spätere
     Verwendung wiederverwendbar.
@@ -332,9 +348,10 @@ requirement_bridge_charge:
     - "PV-Start erfordert zwei lückenlos folgende 15-Minuten-Intervalle der Gesamtanlagen-Prognose mit ausreichender mittlerer Leistung. Tagesenergiesummen und fremde Sensorquellen sind kein Ersatz."
     - "Bei 0, 45 und 60 Sekunden altem as_of bleiben angenommene Snapshots bis zur nächsten regulären Abfrage nutzbar. Refresh, Timeout und frühere Wiederholungen verlängern keine alte Nutzungsfrist; Vertragsfehler, Quellenwechsel und absolute Altersgrenzen bleiben wirksam."
     - "tests/test_pv_bridge_forecast.py belegt bei 2-Sekunden-Polls über zehn Minuten zehn Serviceaufrufe auch bei dauerhaft abgelehnten Antworten. Nur HomeAssistantError/TimeoutError wechseln auf zehn Sekunden; empfangene Ablehnungen und lokale Verarbeitungsfehler beenden diesen Retry. Ein unveränderter Ablehnungsgrund erzeugt bis zu einer gültigen Antwort oder einem Quellenwechsel keinen weiteren Logeintrag."
-    - "Reicht die Batterie bis PV-Start, lautet der Status not_needed und es gibt keinen Ladeauftrag."
+    - "Reicht die Batterie bis PV-Start einschließlich SOC-Puffer, lautet der Status not_needed. Bei 10 % Puffer und prognostizierten 6 % SOC wird eine Ladung eingeplant. Unterhalb des Puffers beginnt eine mögliche Ladung im offenen Tarifabschnitt und berechnet das Ziel aus dem gemessenen SOC."
     - "Bei positivem Bedarf plant ein Auftrag mindestens den eingestellten Energiezuwachs im Speicher ein. Der verfügbare Platz bis zum wirksamen Netzladen Max. SOC kann die Mindestmenge reduzieren. Ein Tarifabschnitt, der bis zum PV-Start zu kurz für die so bestimmte Menge ist, startet keinen Auftrag."
-    - "Mindestladung und SOC-Einstellungen werden im Dashboard gemeinsam übernommen. Werte unter 0,5 kWh, über 100 kWh und außerhalb des 0,1-kWh-Rasters werden abgelehnt. Bestätigte Werte und Entwürfe bleiben bei Fehlern erhalten. Eine wirksame Änderung entwertet den laufenden Plan auch bei blockiertem Geräteabgleich und während beider Quittierungsphasen."
+    - "0 kWh lässt jede positive bedarfsabhängige Lademenge zu und erzeugt keine Mindestmengen-Verlängerung. Das Dashboard zeigt dies in der Ladeplanung an. Einstellbar sind 0 oder 0,5 bis 100 kWh in 0,1-kWh-Schritten sowie 0 bis 100 % SOC-Puffer in ganzen Prozentpunkten."
+    - "Mindestladung, Puffer und SOC-Einstellungen werden gemeinsam übernommen. Bestätigte Werte und Entwürfe bleiben bei Fehlern erhalten. Änderungen an Mindestmenge oder Puffer entwerten den laufenden Plan auch bei blockiertem Geräteabgleich und während beider Quittierungsphasen."
     - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
     - "Bei ausreichendem Spielraum beginnen und enden Voll- und Teilaufträge zehn Minuten früher. Mit weniger Spielraum wird nur der verfügbare Vorlauf genutzt. Ladedauer, Lademenge und berechneter Fehlbetrag bleiben erhalten."
     - "Ein nicht vollständig deckbarer Bedarf bleibt als shortfall_kwh sichtbar, auch wenn eine Teilaufladung bereits läuft."

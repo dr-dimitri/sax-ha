@@ -103,6 +103,108 @@ def test_lower_minimum_makes_short_tariff_window_usable() -> None:
     assert plan.charge_energy_wh == 500
 
 
+def test_zero_minimum_charges_only_the_deficit_in_a_short_window() -> None:
+    plan = _plan(
+        soc=10, pv_start=_at(1), windows=[_window(0, 0.2)], minimum_charge_energy_wh=0
+    )
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert (plan.start, plan.end) == (NOW, _at(0.2))
+    assert plan.charge_energy_wh == 400
+    assert plan.minimum_target_soc is None
+    assert (
+        _plan(soc=50, minimum_charge_energy_wh=0).status
+        == BridgeChargeStatus.NOT_NEEDED
+    )
+
+
+def test_soc_buffer_starts_before_crossing_and_preserves_ten_percent_at_pv() -> None:
+    # Without charging, 16% would drop to 6% before PV.
+    inputs = dict(soc=16, min_soc=0, pv_start=_at(2), minimum_charge_energy_wh=0)
+    assert _plan(**inputs).status == BridgeChargeStatus.NOT_NEEDED
+    plan = _plan(**inputs, soc_buffer=10)
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert plan.required_energy_wh == 400
+    assert plan.charge_energy_wh == pytest.approx(320)
+    assert plan.start == _at(1.2) - timedelta(minutes=10)
+    assert plan.end == plan.start + timedelta(hours=0.16)
+    assert plan.target_soc - (
+        _at(2) - plan.end
+    ).total_seconds() / 3600 * 5 == pytest.approx(10)
+    assert plan.discharge_until == _at(3.2)
+    assert (
+        _plan(**(inputs | {"soc": 20}), soc_buffer=10).status
+        == BridgeChargeStatus.NOT_NEEDED
+    )
+
+
+@pytest.mark.parametrize("soc", [6, 10])
+def test_battery_at_or_below_buffer_charges_from_measured_soc(soc: int) -> None:
+    plan = _plan(
+        soc=soc, min_soc=0, soc_buffer=10, pv_start=_at(1), minimum_charge_energy_wh=0
+    )
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert plan.start == NOW
+    assert plan.required_energy_wh == 500 + 100 * (10 - soc)
+    assert plan.target_soc == pytest.approx(soc + plan.charge_energy_wh / 100)
+    assert plan.missing_energy_wh == 0
+
+
+def test_physical_floor_and_ceiling_bound_the_buffer() -> None:
+    assert _plan(soc_buffer=5) == _plan()
+    plan = _plan(
+        soc=12, soc_buffer=30, max_soc=20, pv_start=_at(1), minimum_charge_energy_wh=0
+    )
+    assert plan.status == BridgeChargeStatus.INSUFFICIENT
+    assert plan.target_soc == 20
+    assert plan.missing_energy_wh >= 1000
+
+
+@pytest.mark.parametrize("minimum_wh", [0, 1000])
+def test_tight_ceiling_starts_at_the_buffer_instead_of_waiting_for_empty(
+    minimum_wh: int,
+) -> None:
+    plan = _plan(
+        soc=20,
+        min_soc=0,
+        soc_buffer=20,
+        max_soc=25,
+        minimum_charge_energy_wh=minimum_wh,
+    )
+    assert plan.status == BridgeChargeStatus.INSUFFICIENT
+    assert plan.start == NOW
+    assert plan.charge_energy_wh == 500
+    assert plan.target_soc == 25
+    assert plan.missing_energy_wh == 3375
+
+
+def test_late_tariff_recovers_the_buffer_from_actual_remaining_energy() -> None:
+    plan = _plan(
+        soc=15,
+        min_soc=0,
+        soc_buffer=10,
+        pv_start=_at(4),
+        windows=[_window(2, 4)],
+        minimum_charge_energy_wh=0,
+    )
+    assert plan.start == _at(2)
+    assert plan.charge_energy_wh == pytest.approx(1200)
+    assert plan.target_soc == pytest.approx(17)
+    assert plan.missing_energy_wh == 0
+
+
+def test_equal_tariff_windows_preserve_the_buffer_when_possible() -> None:
+    plan = _plan(
+        soc=20,
+        min_soc=0,
+        soc_buffer=10,
+        pv_start=_at(4),
+        windows=[_window(0, 1), _window(2.5, 4)],
+        minimum_charge_energy_wh=0,
+    )
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert plan.end <= _at(1)
+
+
 @pytest.mark.parametrize("time_limit", ["tariff", "pv"])
 def test_no_charge_if_only_time_prevents_the_minimum(time_limit: str) -> None:
     plan = _plan(
@@ -384,6 +486,7 @@ def test_past_or_current_pv_start_is_unavailable(pv_start: datetime) -> None:
         "soc",
         "min_soc",
         "max_soc",
+        "soc_buffer",
         "charge_power_w",
     ],
 )
@@ -397,7 +500,7 @@ def test_non_numeric_inputs_are_unavailable(key: str, invalid: Any) -> None:
 
 
 @pytest.mark.parametrize(
-    "invalid", [None, True, "500", 0, -1, float("nan"), float("inf"), 10**1000]
+    "invalid", [None, True, "500", -1, float("nan"), float("inf"), 10**1000]
 )
 def test_invalid_minimum_charge_energy_is_unavailable(invalid: Any) -> None:
     plan = _plan(minimum_charge_energy_wh=invalid)
@@ -414,6 +517,8 @@ def test_invalid_minimum_charge_energy_is_unavailable(invalid: Any) -> None:
         {"min_soc": -1},
         {"min_soc": 90},
         {"max_soc": 101},
+        {"soc_buffer": -1},
+        {"soc_buffer": 101},
         {"capacity_wh": 0},
         {"capacity_wh": -1},
         {"charge_power_w": 0},
@@ -446,8 +551,14 @@ def test_invalid_window_inputs_are_unavailable(windows: Any) -> None:
 @pytest.mark.parametrize("power", [100, 2000, 7000])
 @pytest.mark.parametrize("soc", [10, 25, 95])
 @pytest.mark.parametrize("max_soc", [10, 20, 80])
+@pytest.mark.parametrize(("soc_buffer", "minimum_wh"), [(0, 1000), (25, 0), (25, 500)])
 def test_charge_obeys_physical_energy_balance(
-    discharge: float, power: float, soc: float, max_soc: float
+    discharge: float,
+    power: float,
+    soc: float,
+    max_soc: float,
+    soc_buffer: int,
+    minimum_wh: int,
 ) -> None:
     """Independently account for both gaps and battery energy after execution."""
     windows = [_window(0, 1, 0.1), _window(2, 6, 0.2), _window(7, 8, 0.3)]
@@ -456,6 +567,8 @@ def test_charge_obeys_physical_energy_balance(
         charge_power_w=power,
         soc=soc,
         max_soc=max_soc,
+        soc_buffer=soc_buffer,
+        minimum_charge_energy_wh=minimum_wh,
         windows=windows,
     )
     if plan.start is None:
@@ -474,13 +587,14 @@ def test_charge_obeys_physical_energy_balance(
     gap_before = max(discharge * before_hours - initial_energy, 0)
     remaining_before = max(initial_energy - discharge * before_hours, 0)
     energy_after = remaining_before + power * charging_hours
-    gap_after = max(discharge * after_hours - energy_after, 0)
+    reserve = 100 * max(soc_buffer - 10, 0)
+    gap_after = max(discharge * after_hours + reserve - energy_after, 0)
     assert plan.charge_energy_wh == pytest.approx(power * charging_hours, abs=1e-5)
     assert plan.target_soc == pytest.approx(10 + energy_after / 100, abs=1e-5)
     assert plan.missing_energy_wh == pytest.approx(gap_before + gap_after, abs=1e-5)
-    if plan.charge_energy_wh > 1000 + 1e-5:
-        assert energy_after <= discharge * after_hours + 1e-5
-    if plan.charge_energy_wh < 1000 - 1e-5:
+    if plan.charge_energy_wh > minimum_wh + 1e-5:
+        assert energy_after <= discharge * after_hours + reserve + 1e-5
+    if plan.charge_energy_wh < minimum_wh - 1e-5:
         assert plan.target_soc == pytest.approx(max_soc)
     if plan.status == BridgeChargeStatus.PLANNED:
         assert gap_before + gap_after <= 1e-5

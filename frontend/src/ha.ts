@@ -246,6 +246,9 @@ function serviceCall(
         step <= 0 ||
         min > max ||
         number < min ||
+        (typeof attrs.min_positive === "number" &&
+          number > 0 &&
+          number < attrs.min_positive) ||
         number > max
       ) {
         return null;
@@ -615,6 +618,7 @@ export function useSaxDashboard(
       "timed_charge_min_soc",
       "timed_charge_max_soc",
       "bridge_charge_min_energy_kwh",
+      "bridge_charge_soc_buffer",
       "price_charge_max_price",
       "price_charge_hours",
       "price_charge_neutral_price",

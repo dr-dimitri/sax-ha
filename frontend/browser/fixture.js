@@ -64,6 +64,7 @@ for (const [domain, items] of Object.entries(languages.de.entity)) {
     if (
       key !== "bridge_charge_enabled" &&
       key !== "bridge_charge_min_energy_kwh" &&
+      key !== "bridge_charge_soc_buffer" &&
       !general.includes(key) &&
       !economics.includes(key) &&
       key !== "charging_pv_forecast" &&
@@ -134,8 +135,15 @@ function example({ domain, key, entity_id }) {
   }
   if (key === "bridge_charge_min_energy_kwh") {
     state = "1";
-    attributes = { min: 0.5, max: 100, step: 0.1, unit_of_measurement: "kWh" };
+    attributes = {
+      min: 0,
+      min_positive: 0.5,
+      max: 100,
+      step: 0.1,
+      unit_of_measurement: "kWh",
+    };
   }
+  if (key === "bridge_charge_soc_buffer") state = "0";
   const values = {
     soc: "63.5",
     storage_max_cell_temp: "24.3",

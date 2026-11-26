@@ -951,6 +951,24 @@ async def test_options_flow_rejects_invalid_soc_buffer(
     assert entry.options[key] == 10
 
 
+async def test_options_flow_accepts_bridge_settings_on_initial_submission(
+    hass: HomeAssistant,
+) -> None:
+    entry = _economics_entry(hass)
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.options.async_init(
+            entry.entry_id, data={CONF_BRIDGE_CHARGE_SOC_BUFFER: -1}
+        )
+    assert CONF_BRIDGE_CHARGE_SOC_BUFFER not in entry.options
+    values = {CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: 0, CONF_BRIDGE_CHARGE_SOC_BUFFER: 10}
+    result = await hass.config_entries.options.async_init(
+        entry.entry_id,
+        data={CONF_ECONOMICS_TARIFF_TYPE: TariffType.DISABLED.value, **values},
+    )
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert values.items() <= entry.options.items()
+
+
 # --------------------------------------------------------------------------
 # Wirtschaftlichkeit: Tarifkonfiguration (siehe anforderung.yaml,
 # REQ-ECONOMICS-TARIFFS)

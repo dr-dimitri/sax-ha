@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
+from functools import cached_property
 from typing import Any
 
 import voluptuous as vol
@@ -767,22 +768,28 @@ class SaxPowerOptionsFlow(OptionsFlow):
     #: Auf der ersten Seite abgeschickte Werte, bis der tarifspezifische
     #: Folgeschritt sie vervollständigt (siehe async_step_init).
     _base_options: dict[str, Any]
-    _initial_bridge_settings: dict[str, float]
+
+    @cached_property
+    def _initial_bridge_settings(self) -> dict[str, float]:
+        """Remember the values first seen by this options flow."""
+        options = self.config_entry.options
+        minimum_energy = bridge_charge_min_energy_kwh_from_options(options)
+        return {
+            CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: minimum_energy,
+            CONF_BRIDGE_CHARGE_SOC_BUFFER: bridge_charge_soc_buffer_from_options(
+                options
+            ),
+        }
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
-        if user_input is None:
-            options = self.config_entry.options
-            minimum_energy = bridge_charge_min_energy_kwh_from_options(options)
-            self._initial_bridge_settings = {
-                CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH: minimum_energy,
-                CONF_BRIDGE_CHARGE_SOC_BUFFER: bridge_charge_soc_buffer_from_options(
-                    options
-                ),
-            }
-        else:
+        if user_input is not None:
+            # Programmatic flow initialization can submit data before HA has
+            # shown the form and validated it against its schema.
+            if self.cur_step is None:
+                user_input = STEP_OPTIONS_SCHEMA(user_input)
             tariff_type = TariffType(user_input[CONF_ECONOMICS_TARIFF_TYPE])
             if user_input.get(CONF_BRIDGE_CHARGE_ENABLED) and not user_input.get(
                 CONF_PV_FORECAST_SENSOR

@@ -414,11 +414,16 @@ Lademenge und Ladeziel. Reicht die Energie bis zum PV-Start voraussichtlich
 nicht aus, zeigt die Karte die Fehlmenge und ein verfügbares Teilladefenster.
 Mindestlademenge und SOC-Puffer findest du in den Netzladeeinstellungen darüber.
 
+Startzeit und Restdauer berücksichtigen die gemessene Netzladekurve.
+Von 0 auf 90 % brauchte der Speicher rund **2 Stunden 43 Minuten**,
+von 90 auf 99 % weitere **58 Minuten**. Für das letzte Prozent sind
+etwa 13 Minuten angesetzt. Bei geringerer Ladeleistung dauert es länger.
+
 Die Planung zieht den Ladebeginn um bis zu **zehn Minuten** vor. Ein für
 03:00–04:00 Uhr berechneter Ladeblock beginnt dann um 02:50 Uhr und endet
 um 03:50 Uhr. Beginnt der günstige Tarif erst um 02:55 Uhr, verschiebt sich
 der Block auf 02:55–03:55 Uhr. Auch die aktuelle Uhrzeit und der freie Platz
-bis zur SOC-Obergrenze begrenzen den Vorlauf. Die geplante Lademenge bleibt gleich.
+bis zur SOC-Obergrenze begrenzen den Vorlauf.
 
 Geplant wird jeweils eine zusammenhängende Ladung. Während sie läuft, bleibt
 ihre Verbrauchsbasis erhalten, auch wenn der Entladeprognose-Sensor durch die
@@ -548,7 +553,8 @@ verschieben. Ein Neustart verlängert die eingestellte Ladedauer nicht.
 **Preise & Zeiten**, getrennt vom heutigen Rest-Ertrag der Ladepause.
 Wähle hier einen Energiesensor für den gesamten erwarteten Ertrag morgen;
 der nutzbare Anteil berücksichtigt Eigenverbrauch und Verluste.
-**Smart** reduziert die Netzladung um den nutzbaren PV-Ertrag. Deckt die
+**Smart** reduziert die Netzladung um den nutzbaren PV-Ertrag und berechnet
+die Zeit bis zum verbleibenden Netzladeziel aus der Ladekurve. Deckt die
 Prognose den Bedarf vollständig, entfällt die Netzladung. **Anzahl Stunden**
 bleibt die Obergrenze; das Ladeziel ist **Max. SOC**.
 Fehlen Messwerte für Speicherfüllung, Kapazität oder Ladeleistung, nutzt

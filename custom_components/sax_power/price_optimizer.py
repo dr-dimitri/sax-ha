@@ -56,6 +56,7 @@ from .const import (
     PRICE_STRATEGY_RELATIVE,
     PRICE_STRATEGY_SMART,
 )
+from .domain.charge_curve import GridChargeCurve
 from .domain.forecast import normalize_energy_kwh
 from .domain.price_units import unit_factor
 from .domain.tariff import TariffType, is_valid_import_price
@@ -559,17 +560,17 @@ def _smart_required_hours(ctx: PriceChargeContext) -> tuple[float | None, float]
     usable_pv = max(0.0, (ctx.pv_forecast_kwh or 0.0) * ctx.pv_factor)
     if (
         ctx.capacity_kwh is None
-        or ctx.capacity_kwh <= 0
+        or not 0 < ctx.capacity_kwh < math.inf
         or ctx.current_soc is None
-        or not ctx.charge_power_w
+        or not 0 <= ctx.current_soc <= 100
+        or ctx.charge_power_w is None
+        or not 0 < ctx.charge_power_w < math.inf
     ):
         return None, usable_pv
 
-    missing_kwh = max(0.0, (ctx.target_soc - ctx.current_soc) / 100 * ctx.capacity_kwh)
-    remaining_kwh = max(0.0, missing_kwh - usable_pv)
-    if remaining_kwh <= 0:
-        return 0.0, usable_pv
-    return remaining_kwh / (ctx.charge_power_w / 1000), usable_pv
+    grid_target_soc = ctx.target_soc - usable_pv / ctx.capacity_kwh * 100
+    curve = GridChargeCurve(ctx.capacity_kwh * 1000, ctx.charge_power_w)
+    return curve.seconds_between(ctx.current_soc, grid_target_soc) / 3600, usable_pv
 
 
 def compute_plan(

@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 
 from .bridge_charge import energy_above_buffer_wh
+from .charge_curve import GridChargeCurve
 
 
 def _number(value: object) -> float | None:
@@ -61,7 +62,7 @@ def estimate_charge_progress(
         and 0 <= current_soc <= 100
         and target is not None
     ):
-        seconds = capacity * max(target - current_soc, 0.0) / 100 / power * 3600
+        seconds = GridChargeCurve(capacity, power).seconds_between(current_soc, target)
         if math.isfinite(seconds):
             remaining = seconds
             if window_seconds is not None:

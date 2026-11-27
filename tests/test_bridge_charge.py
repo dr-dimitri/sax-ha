@@ -14,6 +14,7 @@ from custom_components.sax_power.domain.bridge_charge import (
     ChargeWindow,
     plan_bridge_charge,
 )
+from custom_components.sax_power.domain.charge_curve import GridChargeCurve
 
 NOW = datetime(2026, 9, 13, tzinfo=UTC)
 
@@ -326,6 +327,72 @@ def test_start_buffer_uses_only_time_available_at_the_tariff_price() -> None:
     assert plan.missing_energy_wh == 0
 
 
+def test_slow_top_charge_moves_start_before_tariff_deadline() -> None:
+    # Above 97%, two percentage points take 25 minutes on the measured curve.
+    # A 45-minute tariff leaves 20 minutes, including the ten-minute lead.
+    plan = _plan(
+        soc=98,
+        min_soc=97,
+        max_soc=100,
+        average_discharge_w=30,
+        minimum_charge_energy_wh=200,
+        windows=[_window(0, 0.75)],
+    )
+    assert plan.status == BridgeChargeStatus.PLANNED
+    assert (plan.start, plan.end) == (_at(0, 10), _at(0, 35))
+    assert plan.charge_energy_wh == pytest.approx(200)
+    assert plan.target_soc == pytest.approx(99.95)
+
+
+def test_empty_battery_chooses_first_window_long_enough_to_reach_99_percent() -> None:
+    plan = _plan(
+        soc=0,
+        min_soc=0,
+        max_soc=99,
+        charge_power_w=5000,
+        minimum_charge_energy_wh=9900,
+        windows=[_window(0, 3.5), _window(4, 8)],
+    )
+    assert (plan.start, plan.end) == (_at(4), _at(7, 41))
+    assert plan.target_soc == 99
+    assert plan.charge_energy_wh == pytest.approx(9900)
+
+
+def test_minimum_fits_after_discharging_into_a_faster_soc_band() -> None:
+    # At opening 90–100% would take 70.5 minutes. Six minutes of consumption
+    # bring the SOC to 85%, from which the same 1 kWh fits in 35 minutes.
+    plan = _plan(
+        soc=90,
+        min_soc=0,
+        max_soc=100,
+        charge_power_w=5000,
+        average_discharge_w=5000,
+        minimum_charge_energy_wh=1000,
+        windows=[_window(0, 41 / 60)],
+    )
+    assert (plan.start, plan.end) == (_at(0, 6), _at(0, 41))
+    assert plan.target_soc == pytest.approx(95)
+    assert plan.charge_energy_wh == pytest.approx(1000)
+
+
+def test_time_limited_top_charge_reports_only_reachable_energy() -> None:
+    values = dict(
+        soc=98,
+        min_soc=97,
+        max_soc=100,
+        average_discharge_w=30,
+        pv_start=_at(30),
+        windows=[_window(0, 12.5 / 60)],
+    )
+    assert _plan(**values, minimum_charge_energy_wh=200).start is None
+    partial = _plan(**values, minimum_charge_energy_wh=0)
+    assert partial.status == BridgeChargeStatus.INSUFFICIENT
+    assert (partial.start, partial.end) == (NOW, NOW + timedelta(minutes=12.5))
+    assert partial.target_soc == pytest.approx(99)
+    assert partial.charge_energy_wh == pytest.approx(100)
+    assert partial.missing_energy_wh == pytest.approx(693.75)
+
+
 def test_start_buffer_waits_for_enough_capacity_to_deliver_the_planned_energy() -> None:
     plan = _plan(max_soc=30.5)
     assert plan.status == BridgeChargeStatus.PLANNED
@@ -623,11 +690,16 @@ def test_charge_obeys_physical_energy_balance(
     initial_energy = 100 * (soc - 10)
     gap_before = max(discharge * before_hours - initial_energy, 0)
     remaining_before = max(initial_energy - discharge * before_hours, 0)
-    energy_after = remaining_before + power * charging_hours
+    energy_after = 100 * (plan.target_soc - 10)
+    gain = energy_after - remaining_before
+    predicted_hours = GridChargeCurve(10000, power).hours_between(
+        10 + remaining_before / 100, plan.target_soc
+    )
     reserve = 100 * max(soc_buffer - 10, 0)
     gap_after = max(discharge * after_hours + reserve - energy_after, 0)
-    assert plan.charge_energy_wh == pytest.approx(power * charging_hours, abs=1e-5)
-    assert plan.target_soc == pytest.approx(10 + energy_after / 100, abs=1e-5)
+    assert charging_hours == pytest.approx(predicted_hours, abs=1e-8)
+    assert plan.charge_energy_wh == pytest.approx(gain, abs=1e-5)
+    assert gain <= power * charging_hours + 1e-5
     assert plan.missing_energy_wh == pytest.approx(gap_before + gap_after, abs=1e-5)
     if plan.charge_energy_wh > minimum_wh + 1e-5:
         assert energy_after <= discharge * after_hours + reserve + 1e-5

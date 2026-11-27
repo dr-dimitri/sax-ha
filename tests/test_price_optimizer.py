@@ -745,13 +745,81 @@ def test_compute_plan_smart_respects_hours_slider_as_upper_bound() -> None:
     assert len(plan.slots) == 1
 
 
-def test_compute_plan_smart_falls_back_to_hours_without_capacity() -> None:
-    """Ohne Kapazität (SunSpec-Block nicht erreichbar) ist keine
-    Bedarfsrechnung möglich - dann verhält sich Smart wie Relativ."""
+@pytest.mark.parametrize(
+    ("pv_kwh", "expected_start", "expected_minutes"),
+    [(0, 13, 94), (0.9, 14, 36)],
+)
+def test_smart_chooses_earlier_slot_only_for_the_soc_range_charged_from_grid(
+    pv_kwh: float, expected_start: int, expected_minutes: int
+) -> None:
+    plan = compute_plan(
+        _now(),
+        _slots(0.30, 0.20, 0.10),
+        _ctx(
+            strategy=PRICE_STRATEGY_SMART,
+            current_soc=75,
+            target_soc=99,
+            charge_power_w=5000,
+            pv_forecast_kwh=pv_kwh,
+            pv_factor=1,
+        ),
+    )
+    assert plan.next_start == _local(expected_start)
+    assert sum(
+        (slot.end - slot.start for slot in plan.slots), timedelta()
+    ) == timedelta(minutes=expected_minutes)
+
+
+def test_smart_reports_exact_hours_across_multiple_soc_bands() -> None:
+    plan = compute_plan(
+        _now(),
+        _slots(*[0.1] * 5),
+        _ctx(
+            strategy=PRICE_STRATEGY_SMART,
+            hours=5,
+            current_soc=17,
+            target_soc=77,
+            charge_power_w=1500,
+        ),
+    )
+    assert plan.needed_hours == len(plan.slots) == 4
+
+
+def test_smart_exact_pv_coverage_has_no_residual_grid_slot() -> None:
+    plan = compute_plan(
+        _now(),
+        _slots(0.1),
+        _ctx(
+            strategy=PRICE_STRATEGY_SMART,
+            current_soc=24,
+            target_soc=90,
+            pv_forecast_kwh=6.6,
+            pv_factor=1,
+        ),
+    )
+    assert plan.status == PRICE_STATUS_PV_FORECAST_COVERS
+    assert plan.needed_hours == 0
+    assert not plan.slots
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"capacity_kwh": None},
+        {"capacity_kwh": float("nan")},
+        {"charge_power_w": -1},
+        {"charge_power_w": float("inf")},
+        {"current_soc": 101},
+    ],
+)
+def test_compute_plan_smart_falls_back_to_hours_without_valid_measurements(
+    invalid: dict[str, float | None],
+) -> None:
+    """Ohne gültige Gerätewerte plant Smart die eingestellten Stunden."""
     plan = compute_plan(
         _now(),
         _slots(0.30, 0.10, 0.20),
-        _ctx(strategy=PRICE_STRATEGY_SMART, hours=2, capacity_kwh=None),
+        _ctx(strategy=PRICE_STRATEGY_SMART, hours=2, **invalid),
     )
 
     assert len(plan.slots) == 2
@@ -857,10 +925,11 @@ def test_smart_replanning_does_not_refill_unchanged_required_duration(hass) -> N
     cycle = planner._cycle_state
 
     assert cycle is not None
-    assert cycle.budget_seconds == pytest.approx(4 / 3 * 3600)
+    # 40–75% at 3 kW takes 70 minutes, then the curve adds 12 minutes to 80%.
+    assert cycle.budget_seconds == pytest.approx(82 * 60)
     assert sum(
         (interval.end - interval.start).total_seconds() for interval in cycle.intervals
-    ) == pytest.approx(4 / 3 * 3600)
+    ) == pytest.approx(82 * 60)
 
 
 async def test_price_cycle_survives_restart_without_refilling_budget(hass) -> None:

@@ -36,7 +36,45 @@ def test_estimate_uses_device_capacity_and_actual_power(capacity_wh: int) -> Non
     assert result.power_w == 2000
     assert result.target_soc == 80
     assert result.max_soc == 90
-    assert result.remaining_seconds == pytest.approx(capacity_wh * 0.6 / 2000 * 3600)
+    # Up to 75% the measured 2 kW limit all three devices. The last 5%
+    # need at least twelve minutes, even on the smallest battery.
+    assert result.remaining_seconds == pytest.approx(
+        capacity_wh * 0.55 / 2000 * 3600
+        + max(12 * 60, capacity_wh * 0.05 / 2000 * 3600)
+    )
+
+
+@pytest.mark.parametrize(
+    ("start", "target", "minutes"),
+    [
+        (0, 10, 20),
+        (0, 50, 89),
+        (0, 75, 127),
+        (0, 90, 163),
+        (0, 95, 186),
+        (0, 97, 196),
+        (0, 99, 221),
+        (0, 100, 233.5),
+        (90, 99, 58),
+        (98, 99, 12.5),
+    ],
+)
+def test_live_eta_follows_the_measured_grid_charge(
+    start: int, target: int, minutes: float
+) -> None:
+    result = _progress(soc=start, target_soc=target, max_soc=100, storage_power_w=-5000)
+    assert result.remaining_seconds == pytest.approx(minutes * 60)
+
+
+@pytest.mark.parametrize(("watts", "minutes"), [(2000, 103), (480, 300), (250, 576)])
+def test_live_power_limits_each_remaining_band_once(watts: int, minutes: int) -> None:
+    result = _progress(soc=75, target_soc=99, max_soc=100, storage_power_w=-watts)
+    assert result.remaining_seconds == pytest.approx(minutes * 60)
+
+
+def test_exact_live_duration_does_not_round_up_an_extra_minute() -> None:
+    result = _progress(soc=17, target_soc=77, storage_power_w=-1500)
+    assert result.remaining_seconds == 4 * 3600
 
 
 def test_actual_target_and_global_ceiling_both_bound_remaining_energy() -> None:

@@ -566,7 +566,9 @@ async def test_device_capacity_reduces_bridge_charge_demand(
     if required_wh:
         assert plan.charge_energy_wh == pytest.approx(1000)
         assert plan.start is not None and plan.end is not None
-        assert plan.end - plan.start == timedelta(minutes=30)
+        # The 5-kWh battery gains 20 SOC points in the measured 10–50% band.
+        expected_minutes = 34.5 if capacity_wh == 5000 else 30
+        assert plan.end - plan.start == timedelta(minutes=expected_minutes)
         assert coordinator.data["bridge_charge_plan"] == "planned"
         attributes = coordinator.data["bridge_charge_plan_attributes"]
         assert attributes["charge_start"] == plan.start.isoformat()
@@ -1283,7 +1285,7 @@ async def test_live_charge_progress_updates_without_mutating_frozen_plan(
     }
     updated = _publish_at(coordinator, later, next_data)
     assert updated["charging_power_w"] == 4000
-    assert updated["charging_remaining_seconds"] == 720
+    assert updated["charging_remaining_seconds"] == pytest.approx(8 * 69 / 40 * 60)
     assert coordinator._bridge_session.attributes == frozen
     coordinator.async_start_sun_charge.reset_mock()
     coordinator.async_write_extended_register.reset_mock()
@@ -1317,7 +1319,10 @@ async def test_fixed_soc_charging_publishes_progress_while_bridge_is_off(
     assert attributes["charging_active"] is True
     assert attributes["charging_target_soc"] == (100 if calibration else 60)
     assert attributes["charging_max_soc"] == (100 if calibration else 60)
-    assert attributes["charging_remaining_seconds"] == (10800 if calibration else 3600)
+    # At 2 kW, 40–90% takes 150 minutes. The curve adds 70.5 minutes to 100%.
+    assert attributes["charging_remaining_seconds"] == (
+        220.5 * 60 if calibration else 3600
+    )
     coordinator._tariff_charge_deadline = now + timedelta(minutes=10)
     attributes = _publish_at(coordinator, now, data)
     assert attributes["charging_remaining_seconds"] == 600

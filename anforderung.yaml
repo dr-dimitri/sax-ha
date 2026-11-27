@@ -184,8 +184,19 @@ requirement_bridge_charge:
     erlaubte Ladeintervalle. Die Berechnung kennt weder Home Assistant noch
     eine konkrete Tarifquelle. Sie berücksichtigt nutzbare Energie oberhalb
     der Geräte-SOC-Untergrenze, den zeitgewichteten Entladedurchschnitt aus
-    mindestens einer und maximal 15 Minuten, die Geräte-Ladeleistung und den
-    Verbrauch bis PV-Start. Während Netzladung wird der Hausverbrauch direkt
+    mindestens einer und maximal 15 Minuten und den Verbrauch bis PV-Start.
+    Die gemessene Netzladekurve vom 27.11.2026 liefert die Dauer zwischen
+    erwartetem Start-SOC und Ladeziel. Ab 0 % wurden 10, 50, 75, 90, 95, 97
+    und 99 % nach rund 20, 89, 127, 163, 186, 196 und 221 Minuten erreicht.
+    Zwischen diesen Punkten wird linear interpoliert. Für 99 bis 100 %
+    werden aus dem letzten gemessenen Abschnitt 12,5 Minuten geschätzt.
+    Pro Abschnitt begrenzt zusätzlich die Geräte-Ladeleistung den Zuwachs
+    bei der gemeldeten Speicherkapazität. Startzeit, Lademenge und Dauer
+    müssen gemeinsam in den Tarifabschnitt bis PV-Start passen.
+    Passt die Mindestmenge bei Tarifbeginn erst nach weiterer Entladung
+    in einen schnelleren SOC-Bereich, ist der früheste so nutzbare Start
+    im selben Fenster zulässig. Bei gemeldeten 0 % zählt die Fensteröffnung.
+    Während Netzladung wird der Hausverbrauch direkt
     vom Netz gedeckt; dies verringert ebenfalls den Überbrückungsbedarf.
     Ein Auftrag ist zusammenhängend und endet innerhalb eines erlaubten
     Intervalls spätestens zum PV-Start. Bei positivem gemeldetem SOC und gleicher Bedarfsdeckung haben
@@ -321,8 +332,8 @@ requirement_bridge_charge:
     Ladebefehl mit negativem storage_power_active im Sollwertmodus.
     Bei verbrauchsabhängiger Ladung muss die Sitzung zudem tatsächlich laufen;
     feste SOC-Netzladung kann bei ausgeschalteter Bridge ebenfalls laufen.
-    Die Restdauer ist Gesamtkapazität in Wh mal verbleibender SOC-Anteil,
-    geteilt durch die aktuelle positive Ladeleistung, umgerechnet in Sekunden.
+    Die Restdauer folgt derselben Ladekurve vom aktuellen SOC bis zum Ziel.
+    Die gemessene Ladeleistung begrenzt jeden noch zu durchlaufenden Abschnitt.
     Das Ziel ist höchstens effective_timed_charge_max_soc und bei Bridge
     zusätzlich höchstens deren tatsächliches Planziel; das verbleibende
     Auftragsfenster begrenzt die Dauer. Fehlende, ungültige oder veraltete
@@ -366,7 +377,7 @@ requirement_bridge_charge:
     - "0 kWh lässt jede positive bedarfsabhängige Lademenge zu und erzeugt keine Mindestmengen-Verlängerung. Das Dashboard zeigt dies unter Mindestlademenge an. Einstellbar sind 0 oder 0,5 bis 100 kWh in 0,1-kWh-Schritten sowie 0 bis 100 % SOC-Puffer in ganzen Prozentpunkten."
     - "Mindestladung, Puffer und SOC-Einstellungen werden gemeinsam übernommen. Bestätigte Werte und Entwürfe bleiben bei Fehlern erhalten. Änderungen an Mindestmenge oder Puffer entwerten den laufenden Plan auch bei blockiertem Geräteabgleich und während beider Quittierungsphasen."
     - "Geplante Start-/Endzeiten liegen innerhalb der gelieferten Erlaubnisintervalle. Ein Ziel überschreitet weder das Netzladeziel noch die wirksame globale SOC-Grenze."
-    - "Bei ausreichendem Spielraum beginnen und enden Voll- und Teilaufträge zehn Minuten früher. Mit weniger Spielraum wird nur der verfügbare Vorlauf genutzt. Ladedauer, Lademenge und berechneter Fehlbetrag bleiben erhalten."
+    - "Der Vorlauf von bis zu zehn Minuten gilt auch bei abnehmender Ladeleistung. Dauer, Lademenge und Fehlbetrag berücksichtigen den SOC zum vorgezogenen Start. Eine zu kurze Frist erlaubt nur den laut Kurve erreichbaren Zuwachs."
     - "Ein nicht vollständig deckbarer Bedarf bleibt als shortfall_kwh sichtbar, auch wenn eine Teilaufladung bereits läuft."
     - "Während des gestarteten Auftrags beendet der normale Entladeprognose-Reset allein nicht die Ladung. Bei planmäßigem Verlauf gelten das geplante Ende und das SOC-Ziel."
     - "Bei langsamer tatsächlicher Ladung und frischem, gültigem SOC setzt derselbe Auftrag die Ladung über das geplante Ende bis zum Mindestziel fort. Das ursprüngliche Tarifende und der gebundene PV-Start bleiben harte Grenzen. Messdaten- oder Prognoseausfall sowie Schutz- und Prioritätsregeln können die Ladung vorher unterbrechen."
@@ -2678,11 +2689,11 @@ requirement_dynamic_price_charge:
                  (geräteabhängige Gesamtkapazität aus SunSpec-Register
                  40097, skaliert mit 40110 und von Wh nach kWh umgerechnet;
                  keine fest angenommene SAX-Kapazitätsstufe) abzüglich des nutzbaren Anteils
-                 der PV-Prognose, geteilt durch die angenommene Ladeleistung
-                 ("ic_max_power_reference", Register 40053 - der vom Gerät
-                 selbst gemeldete Bezugspunkt, seit dem Wegfall von "Max.
-                 Netzladeleistung" die realistischere Grundlage, siehe
-                 REQ-TIMED-SOC-CHARGE). Deckt die Prognose den Bedarf
+                 der PV-Prognose. Für den aus dem Netz zu ladenden SOC-Bereich
+                 gilt die Ladekurve nach REQ-BRIDGE-CHARGE. Die vom Gerät
+                 gemeldete Referenzleistung (ic_max_power_reference,
+                 Register 40053) begrenzt die Ladeleistung pro Abschnitt.
+                 Deckt die Prognose den Bedarf
                  vollständig, wird gar kein Netzstrom eingekauft (Status
                  "PV-Prognose deckt Bedarf"). "Anzahl Stunden" bleibt dabei
                  Obergrenze. Fehlen Kapazität, SOC oder Ladeleistung,

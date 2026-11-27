@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
+from .charge_curve import GridChargeCurve
+
 _ENERGY_EPSILON = 1e-6
 _START_BUFFER_HOURS = 10 / 60
 DEFAULT_MIN_BRIDGE_CHARGE_ENERGY_WH = 1000
@@ -103,6 +105,114 @@ def _merged_windows(windows: Sequence[ChargeWindow]) -> list[ChargeWindow]:
     return merged
 
 
+@dataclass(frozen=True, slots=True)
+class _ChargeBlock:
+    start: float
+    duration: float
+    before_wh: float
+    gain_wh: float
+
+
+@dataclass(frozen=True, slots=True)
+class _BridgeDemand:
+    discharge_w: float
+    available_wh: float
+    maximum_wh: float
+    reserve_wh: float
+    required_wh: float
+    minimum_wh: float
+    hours_to_buffer: float
+    horizon: float
+    start_at_open: bool
+
+    def fit_window(
+        self,
+        start: float,
+        end: float,
+        min_soc: float,
+        max_soc: float,
+        curve: GridChargeCurve,
+    ) -> _ChargeBlock | None:
+        """Fit one continuous charge between tariff opening and deadline."""
+        discharge = self.discharge_w
+        if self.minimum_wh:
+            at_open_wh = max(0.0, self.available_wh - discharge * start)
+            wait = curve.wait_for_minimum(
+                start_soc=min_soc + at_open_wh / curve.capacity_wh * 100,
+                floor_soc=min_soc,
+                max_soc=max_soc,
+                gain_wh=self.minimum_wh,
+                discharge_w=0.0 if self.start_at_open else discharge,
+                window_hours=end - start,
+            )
+            if wait is None:
+                return None
+            start += wait
+        headroom_limit = self.maximum_wh
+        preferred = start if self.start_at_open else max(start, self.hours_to_buffer)
+        if self.start_at_open or self.reserve_wh:
+            # Waiting for more headroom must not drain the requested reserve.
+            before = max(0.0, self.available_wh - discharge * preferred)
+            headroom = self.maximum_wh - before
+            if self.start_at_open or headroom > _ENERGY_EPSILON:
+                headroom_limit = headroom
+        headroom_by_end = self.maximum_wh - self.available_wh + discharge * end
+        if min(headroom_limit, headroom_by_end) <= 0:
+            return None
+        useful_wh = min(
+            self.required_wh, discharge * (self.horizon - start) + self.reserve_wh
+        )
+
+        def block_at_power(power: float) -> _ChargeBlock:
+            # The grid also covers the house load while the battery charges.
+            combined = power + discharge
+            duration = min(
+                max(self.minimum_wh / power, useful_wh / combined),
+                end - start,
+                headroom_limit / power,
+                headroom_by_end / combined,
+            )
+            gain = power * duration
+            room_at = (
+                (self.available_wh - (self.maximum_wh - gain)) / discharge
+                if discharge
+                else start
+            )
+            desired = preferred
+            if not self.start_at_open and not self.reserve_wh and discharge:
+                # A partial charge can wait until its energy covers the rest.
+                desired = max(desired, self.horizon - combined * duration / discharge)
+            latest = min(end - duration, max(room_at, desired))
+            begin = min(latest, max(start, room_at, latest - _START_BUFFER_HOURS))
+            return _ChargeBlock(
+                begin, duration, max(self.available_wh - discharge * begin, 0.0), gain
+            )
+
+        # Moving the start changes the initial SOC and hence the mean power.
+        # Balance both together so the reported energy fits the actual window.
+        lower, upper = 0.0, curve.fastest_power_w
+        power = upper
+        for _ in range(50):
+            block = block_at_power(power)
+            start_soc = min_soc + block.before_wh / curve.capacity_wh * 100
+            target_soc = start_soc + block.gain_wh / curve.capacity_wh * 100
+            curve_hours = curve.hours_between(start_soc, target_soc)
+            if math.isclose(curve_hours, block.duration, rel_tol=1e-13, abs_tol=1e-14):
+                break
+            if curve_hours > block.duration:
+                upper = power
+            else:
+                lower = power
+            power = lower + (upper - lower) / 2
+
+        if block.duration <= 0 or (
+            block.gain_wh < self.minimum_wh - _ENERGY_EPSILON
+            and self.maximum_wh - block.before_wh - block.gain_wh > _ENERGY_EPSILON
+        ):
+            return None
+        return block
+
+
 def plan_bridge_charge(
     *,
     now: datetime,
@@ -122,9 +232,9 @@ def plan_bridge_charge(
 
     The caller supplies the measured, time-weighted average and the allowed
     tariff intervals. While charging, the grid supplies house consumption and
-    the battery gains ``charge_power_w``. Otherwise it discharges at the
-    measured average down to the physical ``min_soc``. Aim to retain the
-    absolute ``soc_buffer`` through PV start. No discharge lock is assumed.
+    the battery follows its SOC curve up to ``charge_power_w``. Otherwise it
+    discharges at the measured average down to the physical ``min_soc``.
+    Aim to retain the absolute ``soc_buffer`` through PV start.
 
     A charge adds at least ``minimum_charge_energy_wh`` unless the SOC ceiling
     is reached first. A reported SOC of zero selects the earliest executable
@@ -205,71 +315,34 @@ def plan_bridge_charge(
         )
 
     start_at_window_open = reported_soc == 0
-    duration_needed = required / (power + discharge)
-    minimum_duration = minimum_charge_energy_wh / power
     hours_to_buffer = max(above_buffer, 0.0) / discharge if discharge else 0.0
+    curve = GridChargeCurve(capacity_wh, power)
+    bridge = _BridgeDemand(
+        discharge_w=discharge,
+        available_wh=available,
+        maximum_wh=maximum,
+        reserve_wh=reserve,
+        required_wh=required,
+        minimum_wh=minimum_charge_energy_wh,
+        hours_to_buffer=hours_to_buffer,
+        horizon=horizon,
+        start_at_open=start_at_window_open,
+    )
     candidates: list[BridgeChargePlan] = []
     for window in _merged_windows(windows):
         start = max(0.0, (window.start.astimezone(UTC) - now).total_seconds() / 3600)
         end = min(horizon, (window.end.astimezone(UTC) - now).total_seconds() / 3600)
         if start >= end:
             continue
-        # Headroom grows until the battery reaches its SOC floor. Equating
-        # that lower start bound with end-duration gives the second limit.
-        capacity_limit = min(
-            maximum / power,
-            (discharge * end + maximum - available) / (power + discharge),
-        )
-        if start_at_window_open:
-            headroom = maximum - max(0.0, available - discharge * start)
-            capacity_limit = min(capacity_limit, headroom / power)
-        elif reserve:
-            # Waiting for extra headroom could drain the very reserve this
-            # charge should protect. A late tariff opens at the actual SOC.
-            energy_at_buffer_start = max(
-                0.0, available - discharge * max(start, hours_to_buffer)
-            )
-            headroom = maximum - energy_at_buffer_start
-            if headroom > _ENERGY_EPSILON:
-                capacity_limit = min(capacity_limit, headroom / power)
-        time_limit = end - start
-        if (
-            power * time_limit < minimum_charge_energy_wh - _ENERGY_EPSILON
-            and power * (capacity_limit - time_limit) > _ENERGY_EPSILON
-        ):
+        block = bridge.fit_window(start, end, min_soc, max_soc, curve)
+        if block is None:
             continue
-        useful_duration = (discharge * (horizon - start) + reserve) / (
-            power + discharge
-        )
-        duration = min(
-            max(minimum_duration, min(duration_needed, useful_duration)),
-            time_limit,
-            capacity_limit,
-        )
-        if duration <= 0:
-            continue
-        charged = power * duration
-        headroom_start = (
-            (available - (maximum - charged)) / discharge if discharge else 0.0
-        )
-        preferred_start = start if start_at_window_open else hours_to_buffer
-        if not start_at_window_open and not reserve and discharge:
-            # Without a reserve, a partial charge can wait until its energy
-            # just covers the remaining consumption before PV starts.
-            preferred_start = max(
-                preferred_start, horizon - (power + discharge) * duration / discharge
-            )
-        latest_start = min(end - duration, max(start, headroom_start, preferred_start))
-        buffered_start = min(
-            latest_start,
-            max(start, headroom_start, latest_start - _START_BUFFER_HOURS),
-        )
-        demand_before = discharge * buffered_start
-        before_charge = max(available - demand_before, 0.0)
+        charged = block.gain_wh
+        before_charge = block.before_wh
         # Surplus from the minimum charge cannot cover a gap before charging.
         missing = max(
-            demand_before - available,
-            required - (power + discharge) * duration,
+            discharge * block.start - available,
+            required - charged - discharge * block.duration,
             0.0,
         )
         complete = missing <= _ENERGY_EPSILON
@@ -284,8 +357,8 @@ def plan_bridge_charge(
                     else BridgeChargeStatus.INSUFFICIENT
                 ),
                 discharge_until=discharge_until,
-                start=now + timedelta(hours=buffered_start),
-                end=now + timedelta(hours=buffered_start + duration),
+                start=now + timedelta(hours=block.start),
+                end=now + timedelta(hours=block.start + block.duration),
                 target_soc=target_soc,
                 required_energy_wh=required,
                 charge_energy_wh=charged,

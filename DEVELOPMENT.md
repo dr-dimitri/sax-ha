@@ -1103,6 +1103,13 @@ Ladeziel und freier Platz verwenden den tatsächlichen SOC. Die Entladeprognose
 zeigt weiter den Zeitpunkt der physischen Geräteuntergrenze. Während Netzladung wird
 Hausverbrauch aus dem Netz gedeckt. Die Berechnung berücksichtigt den
 Energiezuwachs im Speicher und die in dieser Zeit vermiedene Entladung.
+`domain/charge_curve.py` interpoliert die abgelesenen SOC-Zeit-Paare
+der maximalen Netzladung. Für jeden durchlaufenen Abschnitt gilt zusätzlich
+die Leistungsgrenze des Geräts. Da sich der Speicher bis zum Ladestart
+weiter entlädt, gleicht die Planung die mittlere Ladeleistung für jedes
+Tariffenster mit der Kurvendauer vom erwarteten Start-SOC bis zum Ziel ab.
+Die Smart-Preisplanung nutzt dieselbe Kurve für den nach Abzug der
+PV-Prognose verbleibenden Netzladebedarf.
 Bei positivem Bedarf gilt die eingestellte Mindestlademenge als Untergrenze
 für den geplanten Energiezuwachs im Speicher. Die Planung verwendet Wh.
 Der freie Platz bis zum effektiven Netzlade-Max-SOC begrenzt diese Mindestmenge.
@@ -1277,7 +1284,8 @@ sichtbar. Sie plant nicht selbst und ruft keine Services auf.
 Die zusätzlichen `charging_*`-Attribute werden pro Veröffentlichung aus
 bestätigtem Ladeauftrag, frischem HIGH-Messwert nach dessen Start und
 Sollwertmodus abgeleitet. `charging_remaining_seconds` verwendet Kapazität,
-präzisen SunSpec-SOC und tatsächliche Ladeleistung. Das kleinere tatsächliche
+präzisen SunSpec-SOC und die gemeinsame Netzladekurve. Die aktuelle
+gemessene Ladeleistung begrenzt den Zuwachs pro Abschnitt. Das kleinere tatsächliche
 Planziel und die effektive Netzladegrenze begrenzen das Ziel; die bestätigte
 Auftragsfrist begrenzt die Restdauer zusätzlich. Diese Angaben verändern
 weder die Session noch Gerätebefehle. `post_charge_status` und

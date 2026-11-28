@@ -40,6 +40,7 @@ export interface TariffProfile {
   can_configure?: boolean;
   automation_enabled?: boolean | null;
   fixed_time_charging?: FixedTimeCharging;
+  all_low_tariffs_enabled?: boolean;
   profiles?: {
     time_of_use: TimeOfUseProfile;
     dynamic: DynamicTariffProfile;
@@ -68,7 +69,13 @@ export interface FixedTimeCharging {
 }
 
 export type ChargingMethod =
-  "fixed" | "bridge" | "smart" | "relative" | "absolute" | "off";
+  | "fixed"
+  | "bridge"
+  | "all_low_tariffs"
+  | "smart"
+  | "relative"
+  | "absolute"
+  | "off";
 
 export interface TariffConfiguration {
   revision: string;

@@ -15,6 +15,7 @@ const numbers = ref<InstanceType<typeof ChargingNumberFields>>();
 const dashboard = inject(SAX_DASHBOARD_KEY);
 const fixedTime = useFixedTimeCharging(dashboard);
 const timeInput = ref<InstanceType<typeof FixedTimeChargingInput>>();
+const allLowTariffsDraft = ref(false);
 const pending = computed(
   () =>
     fixedTime.pending.value ||
@@ -27,20 +28,36 @@ const saving = computed(
 );
 async function submit(): Promise<boolean> {
   if (saving.value) return false;
-  if (!fixedTime.validate(timeInput.value?.value())) {
-    timeInput.value?.focus();
-    return false;
+  if (editorMethod.value === "all_low_tariffs") {
+    if (!allLowTariffsAvailable.value) return false;
+    const settings = numbers.value?.prepare() ?? null;
+    if (settings === null) return false;
+    if (selected.value !== "all_low_tariffs" || Object.keys(settings).length) {
+      if (!(await fixedTime.configure("all_low_tariffs", settings)))
+        return false;
+    }
+    allLowTariffsDraft.value = false;
+    return true;
   }
-  if (fixedTime.selected.value) {
+  if (editorMethod.value === "fixed_time") {
+    if (!fixedTime.validate(timeInput.value?.value())) {
+      timeInput.value?.focus();
+      return false;
+    }
     const settings = numbers.value?.prepare() ?? null;
     return settings !== null && fixedTime.submit(settings);
   }
   return (await numbers.value?.submit()) ?? true;
 }
+function reset(): boolean {
+  if (saving.value || !fixedTime.reset() || numbers.value?.reset() === false)
+    return false;
+  allLowTariffsDraft.value = false;
+  return true;
+}
 defineExpose({
   submit,
-  reset: () =>
-    !saving.value && fixedTime.reset() && (numbers.value?.reset() ?? true),
+  reset,
   pending: saving,
 });
 const german = computed(() => dashboard?.language.value === "de");
@@ -61,6 +78,7 @@ const text = computed(() =>
         mode: "Ladeweise",
         fixed: "Festes Netzladeziel",
         fixed_time: "Ab fester Uhrzeit",
+        all_low_tariffs: "In allen Niedrigtarifen",
         bridge: "Nur Bedarf bis Solarstrom",
         target: "Netzladeziel",
         fixedTarget: "Netzladeziel (%)",
@@ -85,6 +103,10 @@ const text = computed(() =>
         readonly: "Keine Berechtigung zum Ändern der Ladeweise.",
         disconnected: "Keine Verbindung zu Home Assistant.",
         pending: "Ladeweise wird übernommen …",
+        failed:
+          "Die Änderung ist fehlgeschlagen. Dein Entwurf bleibt erhalten.",
+        conflict:
+          "Der Tarif wurde inzwischen geändert. Dein Entwurf bleibt erhalten.",
       }
     : {
         saved: "Charging method",
@@ -93,6 +115,7 @@ const text = computed(() =>
         mode: "Charging method",
         fixed: "Fixed grid charge target",
         fixed_time: "Start at a fixed time",
+        all_low_tariffs: "In all low-tariff windows",
         bridge: "Only what is needed until solar power",
         target: "Grid charge target",
         fixedTarget: "Grid charge target (%)",
@@ -116,6 +139,8 @@ const text = computed(() =>
         readonly: "You do not have permission to change the charging method.",
         disconnected: "Disconnected from Home Assistant.",
         pending: "Applying charging method …",
+        failed: "The change failed. Your draft is preserved.",
+        conflict: "The tariff has changed elsewhere. Your draft is preserved.",
       },
 );
 const bridge = computed(() =>
@@ -123,16 +148,37 @@ const bridge = computed(() =>
 );
 type Method = "fixed" | "bridge";
 const methods: Method[] = ["fixed", "bridge"];
-const selected = computed<Method | "fixed_time" | null>(() => {
-  if (fixedTime.active.value && dashboard?.connected.value) return "fixed_time";
-  if (!bridge.value?.available) return null;
-  if (bridge.value.state?.state === "off") return "fixed";
-  if (bridge.value.state?.state === "on") return "bridge";
-  return null;
-});
-const editorMethod = computed(() =>
-  fixedTime.selected.value ? "fixed_time" : selected.value,
+const selected = computed<Method | "fixed_time" | "all_low_tariffs" | null>(
+  () => {
+    if (fixedTime.active.value && dashboard?.connected.value)
+      return "fixed_time";
+    if (
+      dashboard?.connected.value &&
+      dashboard.tariff.value?.all_low_tariffs_enabled === true
+    )
+      return "all_low_tariffs";
+    if (!bridge.value?.available) return null;
+    if (bridge.value.state?.state === "off") return "fixed";
+    if (bridge.value.state?.state === "on") return "bridge";
+    return null;
+  },
 );
+const editorMethod = computed(() =>
+  allLowTariffsDraft.value
+    ? "all_low_tariffs"
+    : fixedTime.selected.value
+      ? "fixed_time"
+      : selected.value,
+);
+const allLowTariffsAvailable = computed(() => {
+  const tariff = dashboard?.tariff.value;
+  return (
+    fixedTime.canConfigure.value &&
+    tariff?.tariff_type === "time_of_use" &&
+    tariff.base_price_ct_kwh != null &&
+    tariff.feed_in_price_ct_kwh != null
+  );
+});
 const blocked = computed(
   () => !bridge.value?.canControl || pending.value || selected.value === null,
 );
@@ -205,12 +251,30 @@ const { monthKeys, monthSummary } = useChargingMonths(dashboard);
 async function choose(method: Method): Promise<void> {
   if (blocked.value) return;
   if (selected.value === method) {
-    if (fixedTime.selected.value) fixedTime.reset();
+    if (fixedTime.reset()) allLowTariffsDraft.value = false;
     return;
   }
-  await fixedTime.leave(method, () =>
-    dashboard!.perform("switch", "bridge_charge_enabled", method === "bridge"),
-  );
+  if (selected.value === "all_low_tariffs") {
+    if (await fixedTime.configure(method)) allLowTariffsDraft.value = false;
+  } else {
+    allLowTariffsDraft.value = false;
+    await fixedTime.leave(method, () =>
+      dashboard!.perform(
+        "switch",
+        "bridge_charge_enabled",
+        method === "bridge",
+      ),
+    );
+  }
+}
+function chooseFixedTime(): void {
+  if (blocked.value || !fixedTime.canConfigure.value) return;
+  allLowTariffsDraft.value = false;
+  fixedTime.choose();
+}
+function chooseAllLowTariffs(): void {
+  if (!blocked.value && allLowTariffsAvailable.value && fixedTime.reset())
+    allLowTariffsDraft.value = true;
 }
 </script>
 
@@ -293,11 +357,7 @@ async function choose(method: Method): Promise<void> {
         class="tou-charging-error"
         role="alert"
       >
-        {{
-          german
-            ? "Die Änderung ist fehlgeschlagen. Bitte erneut versuchen."
-            : "The change failed. Please try again."
-        }}
+        {{ fixedTime.error.value === "conflict" ? text.conflict : text.failed }}
       </p>
       <p
         v-if="editing && bridge?.error"
@@ -339,9 +399,18 @@ async function choose(method: Method): Promise<void> {
           data-method="fixed_time"
           :aria-pressed="editorMethod === 'fixed_time'"
           :disabled="blocked || !fixedTime.canConfigure.value"
-          @click="fixedTime.choose"
+          @click="chooseFixedTime"
         >
           <strong>{{ text.fixed_time }}</strong>
+        </button>
+        <button
+          type="button"
+          data-method="all_low_tariffs"
+          :aria-pressed="editorMethod === 'all_low_tariffs'"
+          :disabled="blocked || !allLowTariffsAvailable"
+          @click="chooseAllLowTariffs"
+        >
+          <strong>{{ text.all_low_tariffs }}</strong>
         </button>
       </div>
       <FixedTimeChargingInput
@@ -363,7 +432,9 @@ async function choose(method: Method): Promise<void> {
         <ChargingNumberFields
           ref="numbers"
           :fields="numberFields"
-          :soc-threshold-applies="editorMethod !== 'fixed_time'"
+          :soc-threshold-applies="
+            editorMethod === 'fixed' || editorMethod === 'bridge'
+          "
           :disabled="fixedTime.pending.value"
           @apply="emit('apply')"
         />

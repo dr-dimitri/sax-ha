@@ -138,6 +138,18 @@ def test_tariff_edit_invalidates_source_even_when_current_price_and_end_match() 
     assert before.source != after.source
 
 
+def test_all_low_mode_cannot_restore_latch_from_original_soc_mode() -> None:
+    config = _config(DailyPriceWindow(dt_time(22), dt_time(6), 0.1))
+    moment = _local("2026-09-14T23:00:00")
+    fixed_soc = tariff_charge_state(config, moment, ALL_MONTHS)
+    all_low = tariff_charge_state(config, moment, ALL_MONTHS, below_base_price=True)
+
+    assert fixed_soc is not None and all_low is not None
+    assert fixed_soc.start == all_low.start
+    assert fixed_soc.expires_at == all_low.expires_at
+    assert fixed_soc.source != all_low.source
+
+
 def test_next_daily_occurrence_cannot_reuse_previous_source() -> None:
     config = _config(DailyPriceWindow(dt_time(22), dt_time(6), 0.1))
 

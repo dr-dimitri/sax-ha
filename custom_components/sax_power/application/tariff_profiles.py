@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from ..const import (
+    CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -30,6 +31,7 @@ TARIFF_PROFILE_KEYS: dict[str, tuple[str, ...]] = {
         *ECONOMICS_TOU_WINDOW_KEYS,
         CONF_PV_FORECAST_SENSOR,
         CONF_BRIDGE_CHARGE_ENABLED,
+        CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     ),
     TariffType.DYNAMIC.value: (
         CONF_ECONOMICS_FEED_IN_PRICE,
@@ -47,6 +49,7 @@ def bridge_configuration_error(options: Mapping[str, Any]) -> str | None:
     if (
         options.get(CONF_BRIDGE_CHARGE_ENABLED) is not True
         or options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is True
+        or options.get(CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED) is True
     ):
         return None
     if not options.get(CONF_PV_FORECAST_SENSOR):

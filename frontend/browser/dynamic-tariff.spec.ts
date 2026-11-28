@@ -351,7 +351,10 @@ test("guided charging methods explain their effects and reveal relevant settings
   await expect(methods).toHaveCount(0);
   await screenshot(page, testInfo, `dynamic-overview-${testInfo.project.name}`);
   await charging.locator("header .editor-actions > button:first-child").click();
-  await expect(methods).toHaveCount(5);
+  await expect(methods).toHaveCount(6);
+  await expect(
+    settings.locator('[data-strategy="all_low_tariffs"]'),
+  ).toBeDisabled();
   await expect(methods.locator("strong")).toHaveText(
     english
       ? [
@@ -360,6 +363,7 @@ test("guided charging methods explain their effects and reveal relevant settings
           "Charge below a fixed price",
           "No automatic charging",
           "Start at a fixed time",
+          "In all low-tariff windows",
         ]
       : [
           "Bedarfsgerecht laden",
@@ -367,6 +371,7 @@ test("guided charging methods explain their effects and reveal relevant settings
           "Bis zu einem festen Preis laden",
           "Keine automatische Ladung",
           "Ab fester Uhrzeit",
+          "In allen Niedrigtarifen",
         ],
   );
   await expect(absolute).toHaveAttribute("aria-pressed", "true");

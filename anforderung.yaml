@@ -43,6 +43,7 @@
 # REQ-TIMED-SOC-CHARGE            done       Zeitgesteuertes Laden auf Ziel-SOC + geräteunabhängige Max-SOC-Sperre + PV-Überschuss-Hysterese
 # REQ-TIME-OF-USE-CHARGE-SOURCE   done       Tarifpreisfenster für tarifgebundene Netzladung im zeitvariablen Tarif (#237)
 # REQ-FIXED-TIME-GRID-CHARGE     done       Täglich ab fester Uhrzeit unabhängig von Start-SOC und Preis bis zum Netzladeziel laden
+# REQ-ALL-LOW-TARIFFS-CHARGE     done       Netzladung in allen Zeitfenstern mit einem Arbeitspreis unter dem Standardpreis
 # REQ-MANUAL-GRID-CHARGE          done       Manueller Netzladeservice als sicherer Adapter auf die zentrale SunSpec-Steuerung
 # REQ-GRID-SERVING-CHARGE         done       Netzdienliches Laden: PV-Ladevorgang im eigenen Zeitfenster aktiv unterbrechen
 # REQ-MANUAL-DISCHARGE            verworfen  Manuelle Entladung mit fester Leistung - vom Hersteller nicht vorgesehen
@@ -872,6 +873,39 @@ requirement_fixed_time_grid_charge:
     - "Der blaue Ladeplanungshinweis folgt bestätigten Startzeitänderungen in DE/EN bei beiden Tarifarten; Entwürfe/fehlgeschlagene Übernahmen ändern ihn nicht und echte laufende Ladung hat Vorrang."
     - "Echte WebSocket-Tests prüfen atomare Validierung, Revisionskonflikte, belegte Geräte-Locks sowie verzögerte/fehlgeschlagene Modus- und Sollwertantworten bei Start und periodischem Schreiben."
     - "Komponenten- und Chromium-/macOS-WebKit-Prüfungen sichern Tastatureingabe, Mitternacht, unvollständige Zeiten, sofortiges Pending, Doppelaufrufsperre und erhaltene Entwürfe bei Fehlern ab."
+
+requirement_all_low_tariffs_charge:
+  id: REQ-ALL-LOW-TARIFFS-CHARGE
+  title: "Netzladung in allen Zeitfenstern mit einem Arbeitspreis unter dem Standardpreis"
+  status: done
+  description: >
+    Unter Stromtarif → Netzladung ist „In allen Niedrigtarifen“ (EN: In all
+    low-tariff windows) bei aktivem zeitvariablem Tarif auswählbar. Bei
+    anderen Tariftypen ist die Auswahl ausgegraut. Die Ladeweise gehört zum
+    zeitvariablen Profil und wird bei einem Wechsel des Tariftyps erst mit
+    dem zeitvariablen Profil wieder wirksam. Ein Wechsel zu einer anderen
+    Ladeweise innerhalb dieses Profils beendet die Auswahl.
+
+    Bei eingeschalteter Automatischer Netzladung beginnt der Speicher im
+    nächsten Steuerungszyklus eines Zeitfensters zu laden, wenn dessen Preis
+    strikt unter dem Standard-Arbeitspreis und der gemessene SOC unter dem
+    wirksamen Netzladeziel liegt. Günstige direkt angrenzende Fenster bilden
+    einen durchgehenden Abschnitt. Der Standardpreis, gleich teure und
+    teurere Zeitfenster geben die Ladung nicht frei. Für Mitternacht, lokale
+    Zeitgrenzen, Monatswechsel, fehlende Daten und die sichere Beendigung des
+    Ladeauftrags gelten die Regeln aus REQ-TIME-OF-USE-CHARGE-SOURCE.
+
+    Die bestehende globale Max-SOC-Grenze mit Kalibrierungsausnahme,
+    Netzladeziel, Netzlademonate, PV-Priorität und Sicherheitsabschaltungen
+    bleiben maßgeblich. Die Min.-SOC-Startschwelle gilt für diese Ladeweise
+    nicht. Nach Erreichen des wirksamen Netzladeziels ist der Auftrag für den
+    laufenden günstigen Abschnitt abgeschlossen. Die Ladeweise wird zusammen
+    mit geänderten SOC-Zielen atomar angenommen. Der gemeinsame Worker löst
+    alte Ladeaufträge nach laufenden Gerätequittierungen ab.
+  acceptance_criteria:
+    - "Unterschiedlich teure Zeitfenster unter dem Standardpreis geben die Ladung frei. Gleiche oder höhere Preise geben sie nicht frei. Andere Ladeweisen verwenden weiterhin ihre eigene Tarifregel."
+    - "Mitternacht, angrenzende Zeitfenster und das Ende der letzten vergünstigten Phase sind abgedeckt. Hauptschalter, Monate, Ziel und Mindestanforderungen an SOC und Gerätebestätigung gelten auch bei verzögerten Antworten und Neustart."
+    - "WebSocket-Tests prüfen zulässige Tariftypen, exklusive Auswahl, Wiederherstellung des Tarifprofils und atomare Annahme bei belegtem Geräte-Lock. Die Oberfläche zeigt bestätigte Ladeweise, Netzladeziel und ausstehende Übernahme."
 
 requirement_time_of_use_charge_source:
   id: REQ-TIME-OF-USE-CHARGE-SOURCE
@@ -3687,6 +3721,8 @@ requirement_vue_electricity_tariff:
     globale SOC-Grenze sowie die wirksamen Netzlademonate; die irrelevante
     SOC-Startschwelle und Preisstrategie werden nicht als Startbedingungen
     dargestellt.
+    Der zeitvariable Tarif ergänzt „In allen Niedrigtarifen“ nach
+    REQ-ALL-LOW-TARIFFS-CHARGE. Die Auswahl im dynamischen Tarif ist gesperrt.
     Ab 860 px nutzbarer Inhaltsbreite stehen die Karten nebeneinander, darunter
     untereinander; DOM- und Tastaturreihenfolge bleiben Preise vor Netzladung.
     Die Übersichten verwenden kurze Beschriftungen, Wertpaare und kompakte
@@ -4121,7 +4157,7 @@ requirement_vue_tariff_comparison:
   description: >
     Der Tab Tarifvergleich (EN: Tariff comparison) unter tarifvergleich
     berechnet Jahreskosten aus einem gemeinsamen, manuell eingegebenen
-    Jahresverbrauch in kWh. Beliebig viele Angebote werden als Fixpreistarif
+    Jahresverbrauch in kWh. Bis zu vier Angebote werden als Fixpreistarif
     oder als zeitvariabler Tarif mit Standard-Arbeitspreis und einem oder
     mehreren täglich gleichen Zeitfenstern eingetragen.
     Die Eingabe verwendet Brutto-Arbeitspreise in ct/kWh, eine Grundgebühr
@@ -4144,8 +4180,16 @@ requirement_vue_tariff_comparison:
     Folgejahr. Im ersten Jahr wird der Bonus einmalig abgezogen. Die Berechnung
     rundet die ausgewiesenen Beträge erst für die Ausgabe auf Cent. Eingaben und
     Berechnung liegen im geöffneten Panel und bleiben beim Tabwechsel
-    verfügbar. Ein Neuladen beginnt mit einem leeren Vergleich. „Zurücksetzen“
-    entfernt alle Angebote und erhält den gemeinsamen Jahresverbrauch.
+    verfügbar. Home Assistant speichert bis zu vier Tarifentwürfe und den
+    gemeinsamen Jahresverbrauch automatisch pro Benutzerkonto und
+    SAX-Integration. Andere Browser desselben Kontos laden den gespeicherten
+    Stand. Bei vier Angeboten ist „Tarif hinzufügen“ gesperrt. Die WebSocket-API
+    prüft die Form und Anzahl unabhängig von der Oberfläche. Revisionen
+    verhindern das unbemerkte Überschreiben eines neueren Vergleichs. Bei
+    Verbindungsfehlern bleibt der Entwurf im geöffneten Dashboard bearbeitbar.
+    „Zurücksetzen“ entfernt die gespeicherten Angebote und erhält den
+    gemeinsamen Jahresverbrauch. Zeitfenster werden kompakt dargestellt und
+    bleiben auf schmalen Bildschirmen bedienbar.
 
     „Kostenverlauf“ öffnet im Tarifvergleich ein Kurvendiagramm der gültigen
     Angebote. Die X-Achse zeigt den Jahresverbrauch in kWh ab null, die Y-Achse
@@ -4169,7 +4213,10 @@ requirement_vue_tariff_comparison:
        und Anteile an. Ungültige Eingaben bleiben korrigierbar."
     - "Browserprüfungen prüfen Stundeneingabe per Tastatur, Zeitfenster über
        Mitternacht, Hinzufügen, Kopieren und Entfernen, den Kostenverlauf für
-       verschiedene Verbrauchswerte, Tabwechsel, Neuladen und Zurücksetzen.
+       verschiedene Verbrauchswerte, Tabwechsel, das Limit von vier Angeboten,
+       das Wiederherstellen nach Neuladen, verzögertes Speichern und
+       Zurücksetzen. WebSocket-Tests prüfen die Speicherung auf dem
+       Home-Assistant-Gerät, Berechtigungen und konkurrierende Änderungen.
        Der Vergleich ist unabhängig von HA-Entitäten und SAX-Gerät und ruft
        keine Dienste auf."
     - "Der Export öffnet den Druckdialog und enthält die Tarifdetails und

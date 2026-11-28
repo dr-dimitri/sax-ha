@@ -26,6 +26,9 @@ const id = useId();
 const fixedTimeEnabled = computed(
   () => dashboard?.tariff.value?.fixed_time_charging?.enabled === true,
 );
+const allLowTariffsEnabled = computed(
+  () => dashboard?.tariff.value?.all_low_tariffs_enabled === true,
+);
 const text = computed(() =>
   dashboard?.language.value === "de"
     ? {
@@ -54,6 +57,15 @@ const text = computed(() =>
         compactImpact: "Die Netzladung nutzt die günstigsten Tarifzeiten.",
         fixedTimeImpact:
           "Die Netzladung beginnt täglich zur festgelegten Uhrzeit, unabhängig vom Strompreis. Netzladeziel und aktive Monate gelten weiterhin.",
+        allLowTariffsImpact:
+          "Die Ladeweise „In allen Niedrigtarifen“ nutzt jedes Zeitfenster unter dem Standardpreis.",
+        allLowTariffsBadge: "unter Standardpreis",
+        allLowTariffsActive:
+          "Der aktuelle Arbeitspreis liegt unter dem Standardpreis.",
+        allLowTariffsInactive:
+          "Aktuell außerhalb der Zeitfenster unter dem Standardpreis.",
+        noAllLowTariffsWindows:
+          "Kein Zeitfenster unter dem Standardpreis eingerichtet.",
         everyDay: "Täglich",
         remaining: "zu allen übrigen Zeiten",
         overnightLabel: "über Nacht",
@@ -147,6 +159,15 @@ const text = computed(() =>
         compactImpact: "Grid charging uses the cheapest tariff periods.",
         fixedTimeImpact:
           "Grid charging starts daily at the configured time, regardless of the electricity price. The grid charging target and active months still apply.",
+        allLowTariffsImpact:
+          "Charging in all low-tariff windows uses every time window below the standard price.",
+        allLowTariffsBadge: "below standard price",
+        allLowTariffsActive:
+          "The current unit price is below the standard price.",
+        allLowTariffsInactive:
+          "Currently outside the windows below the standard price.",
+        noAllLowTariffsWindows:
+          "No time window below the standard price is configured.",
         everyDay: "Every day",
         remaining: "at all remaining times",
         overnightLabel: "overnight",
@@ -212,6 +233,16 @@ const text = computed(() =>
         unavailable: "Unavailable",
         noPrice: "The current electricity price is unavailable.",
       },
+);
+const specialChargingRule = computed(() =>
+  fixedTimeEnabled.value
+    ? text.value.fixedTimeImpact
+    : allLowTariffsEnabled.value
+      ? text.value.allLowTariffsImpact
+      : null,
+);
+const lowBadge = computed(() =>
+  allLowTariffsEnabled.value ? text.value.allLowTariffsBadge : text.value.low,
 );
 const price = computed(() =>
   dashboard?.entity("sensor", "economics_current_import_price"),
@@ -408,15 +439,22 @@ const lowTariffActive = computed(
     attributes.value.low_tariff_active === true &&
     lowTariffUntil.value !== null,
 );
-const isLow = (window: TariffWindow) =>
-  lowTariffAvailable.value && window.low_tariff === true;
+const isLow = (window: TariffWindow) => {
+  if (allLowTariffsEnabled.value) {
+    const standard = finiteValue(attributes.value.base_price_eur_kwh);
+    const windowPrice = finiteValue(window.price_eur_kwh);
+    return standard !== null && windowPrice !== null && windowPrice < standard;
+  }
+  return lowTariffAvailable.value && window.low_tariff === true;
+};
 const baseLow = computed(
   () =>
+    !allLowTariffsEnabled.value &&
     lowTariffAvailable.value &&
     attributes.value.base_price_is_low_tariff === true,
 );
 const status = (current: boolean, low: boolean) =>
-  [current ? text.value.now : "", low ? text.value.low : ""]
+  [current ? text.value.now : "", low ? lowBadge.value : ""]
     .filter(Boolean)
     .join(" · ");
 const active = computed(() => {
@@ -430,6 +468,14 @@ const isActive = (window: TariffWindow) =>
   finiteValue(window.price_eur_kwh) !== null &&
   active.value?.start === window.start &&
   active.value?.end === window.end;
+const allLowTariffsStatus = computed(() => {
+  const eligibleWindows = windows.value.filter(isLow);
+  if (!hasPrice.value) return text.value.awaitingTariff;
+  if (!eligibleWindows.length) return text.value.noAllLowTariffsWindows;
+  return eligibleWindows.some(isActive)
+    ? text.value.allLowTariffsActive
+    : text.value.allLowTariffsInactive;
+});
 const baseActive = computed(
   () =>
     hasPrice.value &&
@@ -788,7 +834,7 @@ watch(tariffVisible, (visible) => {
           >
           <span class="tariff-plan__period-price"
             ><span v-if="isLow(window)" class="tariff-plan__badge">{{
-              text.low
+              lowBadge
             }}</span
             ><strong>{{ tariffPrice(window.price_eur_kwh) }}</strong></span
           >
@@ -811,7 +857,13 @@ watch(tariffVisible, (visible) => {
         ><strong>{{ tariffPrice(attributes.feed_in_price_eur_kwh) }}</strong>
       </div>
       <p
-        v-if="!fixedTimeEnabled && lowTariffAvailable"
+        v-if="allLowTariffsEnabled && !fixedTimeEnabled"
+        class="tariff-plan__period-status"
+      >
+        {{ allLowTariffsStatus }}
+      </p>
+      <p
+        v-else-if="!fixedTimeEnabled && lowTariffAvailable"
         class="tariff-plan__period-status"
       >
         <template v-if="lowTariffActive"
@@ -830,7 +882,7 @@ watch(tariffVisible, (visible) => {
         {{ text.noLowTariff }}
       </p>
       <p class="tariff-plan__impact">
-        {{ fixedTimeEnabled ? text.fixedTimeImpact : text.compactImpact }}
+        {{ specialChargingRule ?? text.compactImpact }}
       </p>
     </div>
     <p v-if="saved" role="status">{{ text.saved }}</p>
@@ -990,7 +1042,7 @@ watch(tariffVisible, (visible) => {
         </details>
         <div class="tariff-plan__impact">
           <strong>{{ text.impact }}</strong>
-          <p>{{ fixedTimeEnabled ? text.fixedTimeImpact : text.impactHint }}</p>
+          <p>{{ specialChargingRule ?? text.impactHint }}</p>
           <p>{{ text.saveHint }}</p>
         </div>
       </fieldset>
@@ -1026,7 +1078,13 @@ watch(tariffVisible, (visible) => {
         ><strong>{{ hasPrice ? currentPrice : text.unavailable }}</strong>
       </p>
       <p
-        v-if="!fixedTimeEnabled && lowTariffAvailable"
+        v-if="allLowTariffsEnabled && !fixedTimeEnabled"
+        class="tariff-plan__period-status"
+      >
+        {{ allLowTariffsStatus }}
+      </p>
+      <p
+        v-else-if="!fixedTimeEnabled && lowTariffAvailable"
         class="tariff-plan__low-status"
       >
         <strong>{{ text.lowTariffPrice }}:</strong>
@@ -1112,7 +1170,7 @@ watch(tariffVisible, (visible) => {
     </details>
     <details class="tariff-plan__details">
       <summary>{{ text.details }}</summary>
-      <p>{{ fixedTimeEnabled ? text.fixedTimeImpact : text.rule }}</p>
+      <p>{{ specialChargingRule ?? text.rule }}</p>
       <p>{{ text.configure }}</p>
     </details>
   </section>

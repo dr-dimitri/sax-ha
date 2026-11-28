@@ -104,6 +104,7 @@ class ChargePolicyInput:
     timed_window_completed: bool = False
     timed_plan_charge_now: bool | None = None
     timed_tariff_window_active: bool | None = None
+    timed_start_threshold_required: bool = True
     fixed_time_selected: bool = False
     fixed_time_charge_now: bool = False
 
@@ -152,8 +153,11 @@ def evaluate_charge_policy(inputs: ChargePolicyInput) -> ChargePolicyDecision:
         and (
             inputs.fixed_time_selected
             or inputs.timed_plan_charge_now is not None
-            or inputs.timed_min_soc is not None
-            and inputs.timed_armed
+            or inputs.timed_armed
+            and (
+                not inputs.timed_start_threshold_required
+                or inputs.timed_min_soc is not None
+            )
         )
     )
     grid_serving_window_active = (

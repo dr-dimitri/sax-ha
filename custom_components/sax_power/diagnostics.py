@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_ECONOMICS_INVESTMENT_COST,
     CONF_ECONOMICS_PRIOR_RESULT,
@@ -41,6 +42,7 @@ from .price_optimizer import ATTRIBUTE_GROUPS
 TO_REDACT = {CONF_HOST}
 _OPTION_KEYS = (
     *ECONOMICS_OPTION_KEYS,
+    CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_PRICE_SENSOR,
     CONF_PRICE_ATTRIBUTE,

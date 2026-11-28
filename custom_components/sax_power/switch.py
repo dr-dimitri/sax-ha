@@ -14,6 +14,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     ALL_MONTHS,
+    CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_ECONOMICS_TARIFF_TYPE,
     CONF_PV_FORECAST_SENSOR,
@@ -224,10 +225,10 @@ class SaxPowerBridgeChargeSwitch(SaxPowerConfigEntity, SwitchEntity):
     def _set_enabled(self, enabled: bool) -> None:
         # Der bestehende Options-Listener wendet die Änderung live an; kein
         # zweiter Restore-Wert und kein direkter Gerätezugriff aus der Entity.
-        self.hass.config_entries.async_update_entry(
-            self._entry,
-            options={**self._entry.options, CONF_BRIDGE_CHARGE_ENABLED: enabled},
-        )
+        options = {**self._entry.options, CONF_BRIDGE_CHARGE_ENABLED: enabled}
+        if enabled:
+            options.pop(CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED, None)
+        self.hass.config_entries.async_update_entry(self._entry, options=options)
         self.async_write_ha_state()
 
 

@@ -18,10 +18,12 @@ let rejectNext = false;
 let holdNextAction = false;
 let releaseAction = null;
 let tariffConfigureRequests = 0;
+let tariffComparisonSaves = 0;
 let writes = 0;
 let activeTariff = "time_of_use";
 let tariffRevision = 1;
 let fixedTimeCharging = { enabled: false, start: null };
+let allLowTariffs = false;
 const query = new URLSearchParams(location.search);
 const bridgePlan = query.has("bridge-plan");
 const dischargeForecast = bridgePlan || query.has("discharge-forecast");
@@ -466,6 +468,10 @@ function tariffResult() {
     can_edit: activeTariff === "time_of_use",
     can_configure: true,
     fixed_time_charging: { ...fixedTimeCharging },
+    all_low_tariffs_enabled:
+      activeTariff === "time_of_use" &&
+      !fixedTimeCharging.enabled &&
+      allLowTariffs,
     automation_enabled:
       states[
         `switch.demo_${!fixedTimeCharging.enabled && activeTariff === "dynamic" ? "price" : "timed"}_charge_enabled`
@@ -539,6 +545,31 @@ states["sensor.demo_remaining_forecast_alternative"] = {
   },
 };
 async function callWS(request) {
+  if (request.type.startsWith("sax_power/dashboard/tariff_comparison/")) {
+    const key = `sax-demo-tariff-comparison:${request.entry_id}`;
+    const read = () =>
+      JSON.parse(sessionStorage.getItem(key)) ?? {
+        revision: "0",
+        annual_consumption: "",
+        tariffs: [],
+      };
+    if (request.type.endsWith("/get")) return read();
+    panel.dataset.tariffComparisonSaves = String(++tariffComparisonSaves);
+    await waitForActionRelease();
+    if (rejectNext) {
+      rejectNext = false;
+      throw { code: "failed" };
+    }
+    const stored = read();
+    if (request.revision !== stored.revision) throw { code: "conflict" };
+    const result = {
+      revision: String(Number(stored.revision) + 1),
+      annual_consumption: request.annual_consumption,
+      tariffs: request.tariffs,
+    };
+    sessionStorage.setItem(key, JSON.stringify(result));
+    return result;
+  }
   if (request.type.startsWith("sax_power/dashboard/grid_serving/")) {
     if (request.type.endsWith("/save")) {
       await waitForActionRelease();
@@ -582,20 +613,25 @@ async function callWS(request) {
         ...request.fixed_time_charging,
         start: start?.length === 5 ? `${start}:00` : start,
       };
-      if (fixedTimeCharging.enabled)
+      if (fixedTimeCharging.enabled) {
+        if (activeTariff === "time_of_use") allLowTariffs = false;
         states["switch.demo_bridge_charge_enabled"] = {
           ...states["switch.demo_bridge_charge_enabled"],
           state: "off",
         };
+      }
     }
     if (request.charging_method) {
       fixedTimeCharging = { ...fixedTimeCharging, enabled: false };
-      if (["fixed", "bridge"].includes(request.charging_method))
+      if (
+        ["fixed", "bridge", "all_low_tariffs"].includes(request.charging_method)
+      ) {
+        allLowTariffs = request.charging_method === "all_low_tariffs";
         states["switch.demo_bridge_charge_enabled"] = {
           ...states["switch.demo_bridge_charge_enabled"],
           state: request.charging_method === "bridge" ? "on" : "off",
         };
-      else
+      } else
         states["select.demo_price_charge_strategy"] = {
           ...states["select.demo_price_charge_strategy"],
           state: request.charging_method,

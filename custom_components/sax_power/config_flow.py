@@ -47,6 +47,7 @@ from .const import (
     ALL_MONTHS,
     BRIDGE_CHARGE_MIN_ENERGY_STEP_KWH,
     BRIDGE_CHARGE_SETTING_KEYS,
+    CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     CONF_BRIDGE_CHARGE_SOC_BUFFER,
@@ -961,6 +962,15 @@ class SaxPowerOptionsFlow(OptionsFlow):
         preserved = {
             key: current[key] for key in BRIDGE_CHARGE_SETTING_KEYS if key in current
         }
+        if (
+            options.get(CONF_ECONOMICS_TARIFF_TYPE) == TariffType.TIME_OF_USE
+            and options.get(CONF_BRIDGE_CHARGE_ENABLED) is not True
+            and tariff_profiles_from_options(current)[TariffType.TIME_OF_USE].get(
+                CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED
+            )
+            is True
+        ):
+            preserved[CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED] = True
         return self.async_create_entry(title="", data={**preserved, **options})
 
     def _suggested(

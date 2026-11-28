@@ -56,6 +56,8 @@ const text = computed(() =>
     ? {
         mode: "Ladeweise",
         fixedTime: "Ab fester Uhrzeit",
+        allLowTariffs: "In allen Niedrigtarifen",
+        timeOfUseRequired: "Nur bei einem zeitvariablen Tarif verfügbar.",
         months: "Aktive Monate",
         global: "Max SOC (%)",
         globalSummary: "Max SOC",
@@ -85,6 +87,8 @@ const text = computed(() =>
     : {
         mode: "Charging method",
         fixedTime: "Start at a fixed time",
+        allLowTariffs: "In all low-tariff windows",
+        timeOfUseRequired: "Available with a time-of-use tariff.",
         months: "Active months",
         global: "Max SOC (%)",
         globalSummary: "Max SOC",
@@ -299,6 +303,14 @@ async function choose(method: Strategy) {
           @click="fixedTime.choose"
         >
           <strong>{{ text.fixedTime }}</strong>
+        </button>
+        <button
+          type="button"
+          data-strategy="all_low_tariffs"
+          :title="text.timeOfUseRequired"
+          disabled
+        >
+          <strong>{{ text.allLowTariffs }}</strong>
         </button>
       </div>
       <FixedTimeChargingInput

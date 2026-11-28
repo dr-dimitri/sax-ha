@@ -142,6 +142,7 @@ export function useFixedTimeCharging(dashboard: SaxDashboard | undefined) {
     edit,
     validate,
     submit,
+    configure,
     leave,
   };
 }

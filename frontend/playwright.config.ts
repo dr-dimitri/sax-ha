@@ -18,6 +18,7 @@ export default defineConfig({
         "tariff-comparison.spec.ts",
         "tariff-editor.spec.ts",
         "fixed-time-charging.spec.ts",
+        "all-low-tariffs.spec.ts",
         "time-window.spec.ts",
         "number-input.spec.ts",
       ],
@@ -33,6 +34,7 @@ export default defineConfig({
         "tariff-comparison.spec.ts",
         "number-input.spec.ts",
         "fixed-time-charging.spec.ts",
+        "all-low-tariffs.spec.ts",
       ],
       use: {
         ...devices["Desktop Safari"],

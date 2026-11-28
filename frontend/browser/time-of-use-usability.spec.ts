@@ -271,11 +271,13 @@ test("charging choices explain their effects and retain the confirmed method whi
           "Fixed grid charge target",
           "Only what is needed until solar power",
           "Start at a fixed time",
+          "In all low-tariff windows",
         ]
       : [
           "Festes Netzladeziel",
           "Nur Bedarf bis Solarstrom",
           "Ab fester Uhrzeit",
+          "In allen Niedrigtarifen",
         ],
   );
   await expect(fixed).toHaveAttribute("aria-pressed", "true");

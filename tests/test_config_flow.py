@@ -15,6 +15,7 @@ from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from custom_components.sax_power import PLATFORMS, config_flow
 from custom_components.sax_power.const import (
+    CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_MIN_ENERGY_KWH,
     CONF_BRIDGE_CHARGE_SOC_BUFFER,
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -1173,6 +1174,7 @@ async def test_time_of_use_finishes_without_a_price_step(hass, existing: bool) -
     profile = {
         CONF_ECONOMICS_FEED_IN_PRICE: 0.0786,
         CONF_ECONOMICS_TOU_BASE_PRICE: 0.32,
+        CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED: True,
         economics_tou_window_key(1): {
             CONF_ECONOMICS_WINDOW_START: "22:00:00",
             CONF_ECONOMICS_WINDOW_END: "06:00:00",

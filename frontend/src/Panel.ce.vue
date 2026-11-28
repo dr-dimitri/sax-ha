@@ -66,6 +66,7 @@ watch(
         attrs.feed_in_price_eur_kwh,
         attrs.windows,
         attrs.price_sensor_entity_id,
+        attrs.all_low_tariffs_enabled,
       ]);
     },
   ],
@@ -206,6 +207,8 @@ function openSidebar(): void {
           <TariffComparisonView
             v-if="showTariffComparison"
             :language="language"
+            :hass="hass"
+            :storage-scope="panel?.config?.entry_id"
           />
         </KeepAlive>
         <template v-if="!showTariffComparison">

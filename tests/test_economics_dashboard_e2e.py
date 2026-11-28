@@ -337,6 +337,7 @@ async def test_tariff_plan_reaches_the_dashboard_session(
         "next_price_change_at": next_change,
         "base_price_eur_kwh": base_price,
         "feed_in_price_eur_kwh": 0.08,
+        "all_low_tariffs_enabled": False,
         "low_tariff_price_eur_kwh": 0.20 if base_is_low else 0.2101,
         "base_price_is_low_tariff": base_is_low,
         "low_tariff_active": low_tariff_active,

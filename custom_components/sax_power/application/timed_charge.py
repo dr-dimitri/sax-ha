@@ -9,12 +9,13 @@ from datetime import time as dt_time
 
 @dataclass(frozen=True, slots=True)
 class TimedChargeState:
-    """An armed hysteresis belonging to one occurrence of an unchanged window."""
+    """A latch belonging to one occurrence of an unchanged window."""
 
     start: dt_time
     end: dt_time
     expires_at: datetime
     source: str | None = None
+    completed_target_soc: int | None = None
 
 
 def is_tariff_source(value: object) -> bool:

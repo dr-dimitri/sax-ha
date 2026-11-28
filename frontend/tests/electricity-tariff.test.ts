@@ -1566,6 +1566,19 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
     await cancelCharging(section);
     expect(section.querySelector(".electricity-charging-editor")).toBeNull();
   });
+  it.each(["fixed", "disabled"])(
+    "displays a disabled all-low tariff choice when the active tariff is %s",
+    async (type) => {
+      const fixture = await mount({ type });
+      expect(button(fixture.root, "In allen Niedrigtarifen").disabled).toBe(
+        true,
+      );
+      expect(
+        fixture.root.querySelector(".electricity-charging-editor"),
+      ).toBeNull();
+      expect(writes(fixture)).toHaveLength(0);
+    },
+  );
   it.each(["de", "en"])(
     "guides charging choices with relevant fields and accurate effects in %s",
     async (language) => {
@@ -1577,7 +1590,12 @@ describe("REQ-VUE-ELECTRICITY-TARIFF: one active tariff and compact configuratio
         section.querySelector(".dynamic-charging-editor details"),
       ).toBeNull();
       expect(section.querySelectorAll("[data-strategy] span")).toHaveLength(0);
-      expect(section.querySelectorAll("[data-strategy]")).toHaveLength(5);
+      expect(section.querySelectorAll("[data-strategy]")).toHaveLength(6);
+      expect(
+        section.querySelector<HTMLButtonElement>(
+          '[data-strategy="all_low_tariffs"]',
+        )?.disabled,
+      ).toBe(true);
       expect(section.textContent).toContain(
         english ? "Maximum price for charging" : "Höchster Preis zum Laden",
       );

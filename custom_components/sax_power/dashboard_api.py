@@ -16,6 +16,7 @@ from .const import DOMAIN
 from .dashboard_grid_serving import async_register_dashboard_grid_serving
 from .dashboard_statistics import async_register_dashboard_statistics
 from .dashboard_tariff import async_register_dashboard_tariff
+from .dashboard_tariff_comparison import async_register_dashboard_tariff_comparison
 
 SUBSCRIBE_COMMAND = "sax_power/dashboard/subscribe"
 _ENTITY_DOMAINS = {"sensor", "binary_sensor", "switch", "number", "time", "select"}
@@ -39,6 +40,7 @@ def async_register_dashboard_api(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, websocket_subscribe_dashboard)
     async_register_dashboard_statistics(hass)
     async_register_dashboard_tariff(hass)
+    async_register_dashboard_tariff_comparison(hass)
     async_register_dashboard_grid_serving(hass)
 
 

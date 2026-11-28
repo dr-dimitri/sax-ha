@@ -1,8 +1,9 @@
-"""Home Assistant persistence for an unfinished timed-charge hysteresis."""
+"""Home Assistant persistence for a timed-charge latch."""
 
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime
 from datetime import time as dt_time
 from typing import Any
@@ -12,7 +13,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
 
 from ..application.timed_charge import TimedChargeState, is_tariff_source
-from ..const import DOMAIN
+from ..const import DOMAIN, MAX_SOC, MIN_SOC
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,11 +49,10 @@ class TimedChargeStateStore:
                 end=dt_time.fromisoformat(raw["end"]),
                 expires_at=datetime.fromisoformat(raw["expires_at"]),
                 source=raw.get("source"),
+                completed_target_soc=raw.get("completed_target_soc"),
             )
             _serialize(state)
-            return TimedChargeState(
-                state.start, state.end, state.expires_at.astimezone(UTC), state.source
-            )
+            return replace(state, expires_at=state.expires_at.astimezone(UTC))
         except (
             HomeAssistantError,
             KeyError,
@@ -90,7 +90,7 @@ class TimedChargeStateStore:
             raise HomeAssistantError("Netzlade-Hysterese nach dem Speichern abweichend")
 
 
-def _serialize(state: TimedChargeState) -> dict[str, str | bool]:
+def _serialize(state: TimedChargeState) -> dict[str, str | bool | int]:
     if not isinstance(state, TimedChargeState):
         raise ValueError("Ungültige Netzlade-Hysterese")
     if any(
@@ -107,7 +107,7 @@ def _serialize(state: TimedChargeState) -> dict[str, str | bool]:
         raise ValueError("Fensterende ist kein Zeitpunkt mit Zeitzone")
     if state.source is not None and not is_tariff_source(state.source):
         raise ValueError("Ungültige Tarifidentität")
-    result = {
+    result: dict[str, str | bool | int] = {
         "armed": True,
         "start": state.start.isoformat(),
         "end": state.end.isoformat(),
@@ -115,4 +115,13 @@ def _serialize(state: TimedChargeState) -> dict[str, str | bool]:
     }
     if state.source is not None:
         result["source"] = state.source
+    target = state.completed_target_soc
+    if target is not None:
+        if (
+            state.source is None
+            or type(target) is not int
+            or not MIN_SOC <= target <= MAX_SOC
+        ):
+            raise ValueError("Ungültiges abgeschlossenes Netzladeziel")
+        result["completed_target_soc"] = target
     return result

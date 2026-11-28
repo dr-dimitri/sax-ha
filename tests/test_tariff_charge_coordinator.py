@@ -17,6 +17,7 @@ from homeassistant.helpers import issue_registry as ir
 from custom_components.sax_power.application.timed_charge import TimedChargeState
 from custom_components.sax_power.application.timed_discharge import TimedDischargeState
 from custom_components.sax_power.const import (
+    CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     DOMAIN,
     ISSUE_CONTROL_CONFIG_UNRESOLVED,
     MIN_SETPOINT_POWER,
@@ -70,7 +71,7 @@ async def coordinator(hass: HomeAssistant) -> AsyncIterator[SaxPowerCoordinator]
 
 
 async def _evaluate(
-    coordinator: SaxPowerCoordinator, now: datetime = NOW, soc: int = 10
+    coordinator: SaxPowerCoordinator, now: datetime = NOW, soc: int | None = 10
 ) -> None:
     coordinator.data = {
         "soc": soc,
@@ -100,6 +101,91 @@ async def test_tariff_replaces_contradictory_legacy_times_and_keeps_soc_latch(
     await _evaluate(coordinator, NOW.replace(hour=13))
     assert not coordinator._timed_charge_active
     assert coordinator._tariff_charge_deadline is None
+
+
+async def test_all_low_tariffs_start_each_phase_and_hold_completed_target(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    """REQ-ALL-LOW-TARIFFS-CHARGE: a completed phase survives a restart."""
+    coordinator.options |= {
+        CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED: True,
+        "economics_tou_window_2": {
+            "start": "06:00:00",
+            "end": "08:00:00",
+            "price_eur_kwh": 0.2,
+        },
+        "economics_tou_window_3": {
+            "start": "08:00:00",
+            "end": "09:00:00",
+            "price_eur_kwh": 0.4,
+        },
+        "economics_tou_window_4": {
+            "start": "10:00:00",
+            "end": "11:00:00",
+            "price_eur_kwh": 0.3,
+        },
+    }
+    coordinator._timed_charge_min_soc = None
+    await _evaluate(coordinator, NOW.replace(hour=6), soc=40)
+    assert coordinator._timed_charge_active
+    assert coordinator._tariff_charge_deadline == NOW.replace(hour=8)
+    await _evaluate(coordinator, NOW.replace(hour=6, minute=1), soc=60)
+    assert not coordinator._timed_charge_active
+    assert coordinator._timed_charge_completed_target == 60
+
+    coordinator._timed_charge_window = None
+    coordinator._timed_charge_completed_target = None
+    await coordinator.async_load_timed_charge_state()
+    await _evaluate(coordinator, NOW.replace(hour=7), soc=40)
+    assert not coordinator._timed_charge_active
+    assert coordinator._timed_charge_completed_target == 60
+
+    await _evaluate(coordinator, NOW.replace(hour=8), soc=40)
+    assert not coordinator._timed_charge_active
+    await _evaluate(coordinator, NOW.replace(hour=9), soc=40)
+    assert not coordinator._timed_charge_active
+    await _evaluate(coordinator, NOW.replace(hour=10), soc=40)
+    assert coordinator._timed_charge_active
+    assert coordinator._tariff_charge_deadline == NOW.replace(hour=11)
+
+
+async def test_all_low_tariffs_apply_a_higher_target_and_the_global_cap(
+    coordinator: SaxPowerCoordinator,
+) -> None:
+    coordinator.options[CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED] = True
+    await _evaluate(coordinator, soc=60)
+    assert not coordinator._timed_charge_active
+    await _evaluate(coordinator, NOW + timedelta(minutes=1), soc=55)
+    assert not coordinator._timed_charge_active
+
+    coordinator._timed_charge_max_soc = 95
+    await _evaluate(coordinator, NOW + timedelta(minutes=2), soc=55)
+    assert coordinator._timed_charge_active
+    await _evaluate(coordinator, NOW + timedelta(minutes=3), soc=80)
+    assert not coordinator._timed_charge_active
+    assert coordinator._max_soc_clamped
+    assert coordinator._timed_charge_completed_target == 80
+
+
+@pytest.mark.parametrize("stop", ["disabled", "month", "missing_soc", "pv_surplus"])
+async def test_all_low_tariffs_respect_automatic_charging_guards(
+    coordinator: SaxPowerCoordinator, stop: str
+) -> None:
+    coordinator.options[CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED] = True
+    if stop == "disabled":
+        coordinator._timed_charge_enabled = False
+    elif stop == "month":
+        coordinator._timed_charge_months.discard(NOW.month)
+    elif stop == "pv_surplus":
+        coordinator._cycles_confirmed = MagicMock(
+            side_effect=lambda counter, _condition: counter
+            == "_timed_charge_pv_surplus_cycles"
+        )
+
+    await _evaluate(coordinator, soc=None if stop == "missing_soc" else 40)
+
+    assert not coordinator._timed_charge_active
+    coordinator.async_start_sun_charge.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -262,9 +348,11 @@ async def test_irrelevant_legacy_repairs_are_hidden_but_preserved(
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
 
 
+@pytest.mark.parametrize("all_low", [False, True])
 async def test_deadline_stops_writer_without_poll(
-    coordinator: SaxPowerCoordinator,
+    coordinator: SaxPowerCoordinator, all_low: bool
 ) -> None:
+    coordinator.options[CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED] = all_low
     await _evaluate(coordinator)
     deadline = coordinator._tariff_charge_deadline
     assert deadline is not None
@@ -281,10 +369,14 @@ async def test_deadline_stops_writer_without_poll(
     assert coordinator._tariff_charge_deadline is None
 
 
-@pytest.mark.parametrize("change", ["deadline", "tariff", "month", "disabled"])
+@pytest.mark.parametrize(
+    "change", ["deadline", "tariff", "month", "disabled", "mode", "target"]
+)
 async def test_late_mode_ack_cannot_extend_tariff_permission(
     coordinator: SaxPowerCoordinator, change: str
 ) -> None:
+    if change in ("mode", "target"):
+        coordinator.options[CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED] = True
     await _evaluate(coordinator)
     clock = NOW
 
@@ -297,8 +389,12 @@ async def test_late_mode_ack_cannot_extend_tariff_permission(
                 coordinator.options = _options("03:00:00", "06:00:00")
             elif change == "month":
                 coordinator._timed_charge_months = set()
-            else:
+            elif change == "disabled":
                 coordinator._timed_charge_enabled = False
+            elif change == "mode":
+                coordinator.options[CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED] = False
+            elif change == "target":
+                coordinator._timed_charge_max_soc = 10
 
     coordinator.async_write_extended_register = AsyncMock(side_effect=write)
     with (

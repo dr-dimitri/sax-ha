@@ -176,9 +176,11 @@ Die Testdateien `time-of-use-charging.test.ts`, `charge-plan.test.ts` und
 
 | Bereich | Verhalten | Prüfung |
 | --- | --- | --- |
-| Angebote | Fixpreis oder Standard-Arbeitspreis mit einem oder mehreren täglichen günstigeren Zeitfenstern. Alle Angebote verwenden denselben Jahresverbrauch in kWh. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
-| Zeitfenster | Start und Ende, Brutto-Arbeitspreis in ct/kWh und Anteil des Jahresverbrauchs je Fenster. Fenster über Mitternacht sind zulässig. Keine Überschneidung, Summe der Anteile höchstens 100 %. Der restliche Verbrauch kostet den Standard-Arbeitspreis. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
+| Angebote | Fixpreis oder Standard-Arbeitspreis mit einem oder mehreren täglichen Zeitfenstern. Alle Angebote verwenden denselben Jahresverbrauch in kWh. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
+| Zeitfenster | Start und Ende, eigener Brutto-Arbeitspreis in ct/kWh und Anteil des Jahresverbrauchs je Fenster. Die Stunde allein wird zu `HH:00` ergänzt. Beim Kopieren bleiben Preis und Anteil erhalten, Start und Ende sind leer. Fenster über Mitternacht sind zulässig. Keine Überschneidung, Summe der Anteile höchstens 100 %. Der restliche Verbrauch kostet den Standard-Arbeitspreis. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
 | Jahreskosten | Ausgewiesen werden Verbrauchskosten, jährliche Grundgebühr und optionaler Bonus. Die Grundgebühr lässt sich in €/Monat oder €/Jahr eingeben. Der Bonus mindert die Kosten des ersten Jahres. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
+| Kostenverlauf | Das Diagramm zeigt die Jahreskosten je gültigem Tarif für verschiedene Verbräuche. Es lässt sich zwischen erstem Jahr und Folgejahren umschalten. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
+| PDF-Export | Lokaler A4-Druckbericht mit Tarifdetails, Vergleich der Jahreskosten und den Kostenkurven für beide Tarifjahre. Der Browser-Druckdialog bietet PDF als Ausgabeziel. | [Browser][tariff-comparison-browser] |
 | Zustand | Eingaben bleiben beim Tabwechsel erhalten. Nach Neuladen ist der Vergleich leer. „Zurücksetzen“ entfernt die Angebote und erhält den Jahresverbrauch. Die Berechnung läuft lokal und ist unabhängig von HA-Entitäten und Geräteverbindung. | [Panel][panel-tests], [Browser][tariff-comparison-browser] |
 
 ## Netzdienliches Laden

@@ -151,10 +151,15 @@ du bei Bedarf aufklappen.
 Unter **Tarifvergleich** trägst du den Jahresverbrauch einmal für alle Angebote
 in kWh ein. Pro Angebot gibst du den Brutto-Arbeitspreis in ct/kWh, die
 Grundgebühr in €/Monat oder €/Jahr und bei Bedarf einen einmaligen Bonus ein.
-Vergünstigte tägliche Zeitfenster können über Mitternacht laufen. Gib für jedes
-Fenster an, wie viel Prozent des Jahresverbrauchs darauf entfallen. Den Rest
-berechnet der Vergleich zum Standard-Arbeitspreis. Du siehst die Gesamtkosten im
-ersten Jahr und pro Folgejahr. **Zurücksetzen** entfernt alle Angebote. Beim
+Tägliche Zeitfenster können über Mitternacht laufen. Gib je Fenster einen
+eigenen Arbeitspreis und den Anteil am Jahresverbrauch ein. Den Rest berechnet
+der Vergleich zum Standard-Arbeitspreis. Eine Eingabe wie `6` wird zu `06:00`.
+Beim Kopieren eines Zeitfensters werden Arbeitspreis und Verbrauchsanteil
+übernommen, Beginn und Ende gibst du neu ein. Unter **Kostenverlauf** siehst
+du, wie sich die Gesamtkosten im ersten Jahr und in den Folgejahren bei
+unterschiedlichem Verbrauch entwickeln. **Als PDF exportieren** öffnet den
+Druckdialog mit Tarifdetails, Jahreskosten und beiden Kostenkurven. Wähle
+dort **Als PDF speichern**. **Zurücksetzen** entfernt alle Angebote. Beim
 Neuladen der Seite beginnt der Vergleich leer.
 
 Nach einem Dashboard-Update kann unter **Einstellungen → System →

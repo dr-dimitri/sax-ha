@@ -4123,17 +4123,21 @@ requirement_vue_tariff_comparison:
     berechnet Jahreskosten aus einem gemeinsamen, manuell eingegebenen
     Jahresverbrauch in kWh. Beliebig viele Angebote werden als Fixpreistarif
     oder als zeitvariabler Tarif mit Standard-Arbeitspreis und einem oder
-    mehreren täglich gleichen vergünstigten Zeitfenstern eingetragen.
+    mehreren täglich gleichen Zeitfenstern eingetragen.
     Die Eingabe verwendet Brutto-Arbeitspreise in ct/kWh, eine Grundgebühr
     wahlweise in €/Monat oder €/Jahr und einen optionalen einmaligen Bonus in
     Euro. Börsenpreisbasierte Tarife sind von der Auswahl ausgeschlossen.
 
-    Je Zeitfenster werden Anfang, Ende, günstigerer Arbeitspreis und Anteil
-    am Jahresverbrauch in Prozent angegeben. Zeitfenster dürfen über
-    Mitternacht laufen und unmittelbar aneinander grenzen. Das Ende ist
-    exklusiv. Zeitfenster dürfen sich nicht überschneiden und ihre Anteile
-    dürfen in Summe höchstens 100 % betragen. Der Standard-Arbeitspreis gilt
-    für den übrigen Verbrauchsanteil.
+    Je Zeitfenster werden Anfang, Ende, ein eigener Arbeitspreis und der Anteil
+    am Jahresverbrauch in Prozent angegeben. Der Arbeitspreis darf niedriger,
+    gleich oder höher als der Standard-Arbeitspreis sein. Eine allein
+    eingegebene Stunde von 0 bis 23 wird beim Übernehmen der Eingabe zu HH:00
+    ergänzt. „Zeitfenster kopieren“ fügt direkt nach dem Original ein Fenster
+    mit demselben Arbeitspreis und Verbrauchsanteil sowie leeren Zeitfeldern ein.
+    Zeitfenster dürfen über Mitternacht laufen und unmittelbar aneinander
+    grenzen. Das Ende ist exklusiv. Zeitfenster dürfen sich nicht überschneiden
+    und ihre Anteile dürfen in Summe höchstens 100 % betragen. Der
+    Standard-Arbeitspreis gilt für den übrigen Verbrauchsanteil.
 
     Für jedes gültige Angebot zeigt der Vergleich Verbrauchskosten,
     jährliche Grundgebühr, Bonus sowie die Gesamtkosten im ersten Jahr und pro
@@ -4142,16 +4146,35 @@ requirement_vue_tariff_comparison:
     Berechnung liegen im geöffneten Panel und bleiben beim Tabwechsel
     verfügbar. Ein Neuladen beginnt mit einem leeren Vergleich. „Zurücksetzen“
     entfernt alle Angebote und erhält den gemeinsamen Jahresverbrauch.
+
+    „Kostenverlauf“ öffnet im Tarifvergleich ein Kurvendiagramm der gültigen
+    Angebote. Die X-Achse zeigt den Jahresverbrauch in kWh ab null, die Y-Achse
+    die Jahreskosten in Euro. Beim Variieren des Verbrauchs bleiben die
+    eingegebenen Verbrauchsanteile konstant. Die Ansicht ist zwischen erstem
+    Jahr mit Bonus und Folgejahren umschaltbar. Der Eingabewert dient als
+    Bezugspunkt für die Skala und lässt sich innerhalb des Diagramms zur
+    Anzeige der Kosten je Angebot variieren.
+
+    „Als PDF exportieren“ öffnet einen druckfertigen A4-Bericht mit den
+    vollständigen Angeboten, Tarifdetails, Jahreskosten und Kostenkurven für
+    das erste Jahr und die Folgejahre. Der Bericht kennzeichnet die Zahl der
+    unvollständigen Angebote und ist bei zugeklapptem Diagramm verfügbar.
+    Der Druckdialog des Browsers ermöglicht das lokale Speichern als PDF.
   acceptance_criteria:
     - "Tests prüfen einen Verbrauchswert für alle Angebote, monatliche und
        jährliche Grundgebühr, Restanteil zum Standardpreis, genau 100 % in den
-       Zeitfenstern, Dezimalwerte und die Jahreskosten mit und ohne Bonus."
+       Zeitfenstern, Aufpreise, Dezimalwerte und die Jahreskosten mit und ohne
+       Bonus. Die Kurven beruhen auf denselben gewichteten Preisen und Gebühren."
     - "Feldfehler zeigen ungültige Zeiten, Überschneidungen, ungültige Preise
        und Anteile an. Ungültige Eingaben bleiben korrigierbar."
-    - "Browserprüfungen prüfen beschriftete Felder, Zeitfenster über
-       Mitternacht, Hinzufügen und Entfernen, Tabwechsel, Neuladen und
-       Zurücksetzen. Der Vergleich ist unabhängig von HA-Entitäten und
-       SAX-Gerät und ruft keine Dienste auf."
+    - "Browserprüfungen prüfen Stundeneingabe per Tastatur, Zeitfenster über
+       Mitternacht, Hinzufügen, Kopieren und Entfernen, den Kostenverlauf für
+       verschiedene Verbrauchswerte, Tabwechsel, Neuladen und Zurücksetzen.
+       Der Vergleich ist unabhängig von HA-Entitäten und SAX-Gerät und ruft
+       keine Dienste auf."
+    - "Der Export öffnet den Druckdialog und enthält die Tarifdetails und
+       beide Kostenkurven. Die Druckvorlage ist in Deutsch und Englisch
+       verfügbar."
 
 # ==============================================================================
 # ANFORDERUNG: VUE-ERSPARNIS UND RECORDER-AUSWERTUNG

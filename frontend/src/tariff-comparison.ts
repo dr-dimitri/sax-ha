@@ -24,7 +24,6 @@ export type ComparisonTariffError =
   | "invalidTime"
   | "sameTime"
   | "overlap"
-  | "notDiscounted"
   | "shareTooHigh"
   | "totalShareTooHigh"
   | "missingWindow";
@@ -49,6 +48,13 @@ export type ComparisonTariffCalculation =
       firstYearCost: number;
       bonus: number;
       standardShare: number;
+      firstYearAtZero: number;
+      standardAtZero: number;
+      annualCostPerKwh: number;
+      costAtConsumption: (
+        consumption: number,
+        firstYear: boolean,
+      ) => number | null;
     }
   | { valid: false; errors: ComparisonTariffErrors };
 
@@ -64,6 +70,22 @@ const SECONDS_PER_DAY = 24 * 60 * 60;
 const ZERO: Decimal = { coefficient: 0n, scale: 0 };
 const FULL_SHARE: Decimal = { coefficient: 100n, scale: 0 };
 
+export function normalizeComparisonTime(value: string): string {
+  const hour = value.trim();
+  return /^(?:[01]?\d|2[0-3])$/.test(hour)
+    ? `${hour.padStart(2, "0")}:00`
+    : normalizeTime(value);
+}
+
+function decimalFromString(value: string): Decimal {
+  const [mantissa, exponent = "0"] = value.split("e");
+  const [whole, fraction = ""] = mantissa!.split(".");
+  return {
+    coefficient: BigInt(`${whole || "0"}${fraction}`),
+    scale: fraction.length - Number(exponent),
+  };
+}
+
 function parseNumber(input: string, optional = false): ParsedNumber {
   const decimal = input.trim().replace(",", ".");
   if (!decimal) {
@@ -78,13 +100,7 @@ function parseNumber(input: string, optional = false): ParsedNumber {
   if (!Number.isFinite(Number(decimal))) {
     return { value: null, error: "outOfRange" };
   }
-  const [whole, fraction = ""] = decimal.split(".");
-  return {
-    value: {
-      coefficient: BigInt(`${whole || "0"}${fraction}`),
-      scale: fraction.length,
-    },
-  };
+  return { value: decimalFromString(decimal) };
 }
 
 export function validateAnnualConsumption(
@@ -113,7 +129,7 @@ function multiply(first: Decimal, second: Decimal): Decimal {
 }
 
 function toNumber(value: Decimal): number {
-  return Number(`${value.coefficient}e-${value.scale}`);
+  return Number(`${value.coefficient}e${-value.scale}`);
 }
 
 function roundedEuro(value: Decimal): number {
@@ -157,15 +173,15 @@ export function calculateTariffComparison(
   if (bonus.error) errors.bonus = bonus.error;
 
   let standardShare = FULL_SHARE;
-  let discountedPrice = ZERO;
+  let weightedWindowPrices = ZERO;
   if (tariff.type === "time-of-use") {
     if (tariff.windows.length === 0) errors.windows = "missingWindow";
     const segments: WindowSegment[] = [];
     tariff.windows.forEach((window, windowIndex) => {
       const fields: ComparisonTariffErrors["windowFields"][number] = {};
       errors.windowFields.push(fields);
-      const start = timeSeconds(normalizeTime(window.start));
-      const end = timeSeconds(normalizeTime(window.end));
+      const start = timeSeconds(normalizeComparisonTime(window.start));
+      const end = timeSeconds(normalizeComparisonTime(window.end));
       if (start === null)
         fields.start = window.start.trim() ? "invalidTime" : "required";
       if (end === null)
@@ -183,12 +199,6 @@ export function calculateTariffComparison(
 
       const windowPrice = parseNumber(window.price);
       if (windowPrice.error) fields.price = windowPrice.error;
-      else if (
-        price.value !== null &&
-        subtract(windowPrice.value, price.value).coefficient >= 0n
-      ) {
-        fields.price = "notDiscounted";
-      }
 
       const share = parseNumber(window.share);
       if (share.error) {
@@ -198,8 +208,8 @@ export function calculateTariffComparison(
       } else {
         standardShare = subtract(standardShare, share.value);
         if (windowPrice.value !== null) {
-          discountedPrice = add(
-            discountedPrice,
+          weightedWindowPrices = add(
+            weightedWindowPrices,
             multiply(windowPrice.value, share.value),
           );
         }
@@ -222,13 +232,14 @@ export function calculateTariffComparison(
 
   const weightedPrice = add(
     multiply(price.value, standardShare),
-    discountedPrice,
+    weightedWindowPrices,
   );
   // Convert both the price from cents to euros and the share from percent.
-  const energy = multiply(annualConsumption.value, {
+  const pricePerKwh = {
     ...weightedPrice,
     scale: weightedPrice.scale + 4,
-  });
+  };
+  const energy = multiply(annualConsumption.value, pricePerKwh);
   const fee = {
     ...baseFee.value,
     coefficient:
@@ -247,14 +258,29 @@ export function calculateTariffComparison(
     errors.price = "outOfRange";
     return { valid: false, errors };
   }
+  const firstYearFee = subtract(fee, bonus.value);
 
   return {
     valid: true,
     annualEnergyCost,
     annualBaseFee,
     annualCost,
-    firstYearCost: roundedEuro(subtract(total, bonus.value)),
+    firstYearCost: roundedEuro(add(energy, firstYearFee)),
     bonus: roundedEuro(bonus.value),
     standardShare: toNumber(standardShare),
+    firstYearAtZero: toNumber(firstYearFee),
+    standardAtZero: toNumber(fee),
+    annualCostPerKwh: toNumber(pricePerKwh),
+    costAtConsumption(consumption, firstYear) {
+      if (!Number.isFinite(consumption) || consumption < 0) return null;
+      const sampleEnergy = multiply(
+        decimalFromString(String(consumption)),
+        pricePerKwh,
+      );
+      const cost = roundedEuro(
+        add(sampleEnergy, firstYear ? firstYearFee : fee),
+      );
+      return Number.isFinite(cost) ? cost : null;
+    },
   };
 }

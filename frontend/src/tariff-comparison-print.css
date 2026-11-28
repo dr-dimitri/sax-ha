@@ -1,0 +1,278 @@
+@page {
+  size: A4;
+  margin: 12mm 13mm;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+}
+
+.tariff-comparison-print-report {
+  --report-text: #14252d;
+  --report-muted: #405760;
+  --report-accent: #15566b;
+  --report-line: #c7d5db;
+  --report-tint: #edf4f7;
+  color: var(--report-text);
+  background: #fff;
+  font:
+    10pt/1.35 system-ui,
+    sans-serif;
+  overflow-wrap: anywhere;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.tariff-comparison-print-report h1,
+.tariff-comparison-print-report h2,
+.tariff-comparison-print-report h3,
+.tariff-comparison-print-report p,
+.tariff-comparison-print-report dl,
+.tariff-comparison-print-report dd {
+  margin: 0;
+}
+
+.tariff-comparison-print-report h2,
+.tariff-comparison-print-report h3 {
+  break-after: avoid-page;
+}
+
+.tariff-comparison-print-report h1 {
+  font-size: 24pt;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.tariff-comparison-print-report h2,
+.tariff-comparison-print-report .report-overview caption {
+  color: var(--report-accent);
+  font-size: 13pt;
+  font-weight: 700;
+}
+
+.tariff-comparison-print-report h3 {
+  font-size: 10.5pt;
+  font-weight: 650;
+}
+
+.tariff-comparison-print-report .report-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 6mm;
+  margin-bottom: 4mm;
+  padding-bottom: 3mm;
+  border-bottom: 1pt solid var(--report-accent);
+  break-inside: avoid;
+}
+
+.tariff-comparison-print-report .report-header .report-note {
+  margin-top: 1.5mm;
+  color: var(--report-muted);
+  font-size: 9pt;
+}
+
+.tariff-comparison-print-report .report-consumption {
+  text-align: end;
+}
+
+.tariff-comparison-print-report dt {
+  color: var(--report-muted);
+  font-size: 8.5pt;
+}
+
+.tariff-comparison-print-report .report-consumption dd {
+  color: var(--report-accent);
+  font-size: 14pt;
+  font-weight: 650;
+}
+
+.tariff-comparison-print-report table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-variant-numeric: tabular-nums;
+}
+
+.tariff-comparison-print-report caption {
+  padding-bottom: 1.5mm;
+  text-align: start;
+  font-weight: 650;
+}
+
+.tariff-comparison-print-report thead {
+  display: table-header-group;
+  background: var(--report-tint);
+}
+
+.tariff-comparison-print-report tr {
+  break-inside: avoid;
+}
+
+.tariff-comparison-print-report th,
+.tariff-comparison-print-report td {
+  padding: 1.5mm 2mm;
+  border-bottom: 0.5pt solid var(--report-line);
+  text-align: end;
+  vertical-align: top;
+}
+
+.tariff-comparison-print-report .report-overview th:first-child {
+  width: 22%;
+  text-align: start;
+}
+
+.tariff-comparison-print-report .report-overview thead th {
+  font-size: 8.5pt;
+}
+
+.tariff-comparison-print-report .report-overview th:nth-child(2) {
+  width: 18%;
+}
+
+.tariff-comparison-print-report .report-overview th,
+.tariff-comparison-print-report .report-overview td {
+  padding-inline: 1.5mm;
+}
+
+.tariff-comparison-print-report .report-overview tbody {
+  font-size: 9pt;
+}
+
+.tariff-comparison-print-report .report-total {
+  font-weight: 700;
+}
+
+.tariff-comparison-print-report .report-section {
+  margin-top: 3.5mm;
+}
+
+.tariff-comparison-print-report .report-chart {
+  margin-top: 1.5mm;
+  break-inside: avoid-page;
+}
+
+.tariff-comparison-print-report .cost-chart > svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 49mm;
+}
+
+.tariff-comparison-print-report svg text {
+  fill: var(--report-muted);
+  font:
+    11px system-ui,
+    sans-serif;
+}
+
+.tariff-comparison-print-report .grid-line {
+  stroke: var(--report-line);
+}
+
+.tariff-comparison-print-report .zero-line,
+.tariff-comparison-print-report .cursor-line {
+  stroke: var(--report-muted);
+}
+
+.tariff-comparison-print-report .cursor-line {
+  stroke-dasharray: 3 4;
+}
+
+.tariff-comparison-print-report .tariff-line {
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.tariff-comparison-print-report .selected-costs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1mm 4mm;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 8.5pt;
+}
+
+.tariff-comparison-print-report .selected-costs li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1.5mm;
+  border-bottom: 0.5pt solid var(--report-line);
+  break-inside: avoid;
+}
+
+.tariff-comparison-print-report .selected-costs strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.tariff-comparison-print-report .report-tariff {
+  margin-top: 2.5mm;
+  border-top: 0.5pt solid var(--report-line);
+  padding-top: 2mm;
+  break-inside: avoid-page;
+}
+
+.tariff-comparison-print-report .report-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2mm;
+  margin-top: 1.5mm;
+  break-inside: avoid;
+}
+
+.tariff-comparison-print-report .report-windows {
+  margin-top: 2mm;
+  font-size: 9pt;
+}
+
+.tariff-comparison-print-report .report-windows th,
+.tariff-comparison-print-report .report-windows td {
+  padding-block: 1.2mm;
+}
+
+.tariff-comparison-print-report .report-windows th:nth-child(-n + 2),
+.tariff-comparison-print-report .report-windows td:nth-child(-n + 2) {
+  text-align: start;
+}
+
+@media screen {
+  body {
+    padding: 12px;
+    background: #e5eef1;
+  }
+
+  .tariff-comparison-print-report {
+    max-width: 184mm;
+    margin-inline: auto;
+    padding: clamp(12px, 3vw, 12mm);
+    box-shadow: 0 2px 14px #172e3926;
+  }
+
+  .tariff-print-action {
+    display: block;
+    margin: 0 auto 12px;
+    min-height: 44px;
+    padding: 6px 18px;
+    border: 1px solid #15566b;
+    border-radius: 6px;
+    color: #fff;
+    background: #15566b;
+    font:
+      600 11pt system-ui,
+      sans-serif;
+    cursor: pointer;
+  }
+}
+
+@media print {
+  .tariff-print-action {
+    display: none;
+  }
+}

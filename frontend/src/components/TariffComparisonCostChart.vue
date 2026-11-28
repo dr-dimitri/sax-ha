@@ -15,6 +15,7 @@ const props = defineProps<{
   language: Language;
   annualConsumption: number;
   tariffs: readonly ChartTariff[];
+  reportPeriod?: "first" | "later";
 }>();
 
 const text = computed(() =>
@@ -74,25 +75,33 @@ const colors = [
 ];
 const dashes = ["none", "8 4", "3 4", "10 4 3 4", "2 3", "5 3 2 3"];
 const id = `sax-cost-chart-${useId()}`;
-const firstYear = ref(true);
-const consumption = ref(props.annualConsumption);
+const selectedFirstYear = ref(true);
+const selectedConsumption = ref(props.annualConsumption);
+const firstYear = computed(() =>
+  props.reportPeriod ? props.reportPeriod === "first" : selectedFirstYear.value,
+);
+const consumption = computed(() =>
+  props.reportPeriod ? props.annualConsumption : selectedConsumption.value,
+);
 const container = ref<HTMLElement>();
-const width = ref(620);
+const containerWidth = ref(620);
+const width = computed(() => (props.reportPeriod ? 680 : containerWidth.value));
 let observer: ResizeObserver | undefined;
 
 watch(
   () => props.annualConsumption,
   (value) => {
-    consumption.value = value;
+    selectedConsumption.value = value;
   },
 );
 onMounted(() => {
   const element = container.value;
-  if (!element) return;
-  width.value = Math.max(180, element.clientWidth);
+  if (!element || props.reportPeriod) return;
+  containerWidth.value = Math.max(180, element.clientWidth);
   if (typeof ResizeObserver === "undefined") return;
   observer = new ResizeObserver(([entry]) => {
-    if (entry) width.value = Math.max(180, Math.round(entry.contentRect.width));
+    if (entry)
+      containerWidth.value = Math.max(180, Math.round(entry.contentRect.width));
   });
   observer.observe(element);
 });
@@ -181,14 +190,24 @@ function displayCost(tariff: ChartTariff): string {
 
 <template>
   <div ref="container" class="cost-chart">
-    <fieldset class="year">
+    <fieldset v-if="!reportPeriod" class="year">
       <legend>{{ text.year }}</legend>
       <label>
-        <input v-model="firstYear" :name="id" type="radio" :value="true" />
+        <input
+          v-model="selectedFirstYear"
+          :name="id"
+          type="radio"
+          :value="true"
+        />
         {{ text.firstYear }}
       </label>
       <label>
-        <input v-model="firstYear" :name="id" type="radio" :value="false" />
+        <input
+          v-model="selectedFirstYear"
+          :name="id"
+          type="radio"
+          :value="false"
+        />
         {{ text.laterYears }}
       </label>
     </fieldset>
@@ -260,14 +279,14 @@ function displayCost(tariff: ChartTariff): string {
       </g>
     </svg>
 
-    <div class="selection">
+    <div v-if="!reportPeriod" class="selection">
       <label :for="`${id}-consumption`">{{ text.selection }}</label>
       <output :for="`${id}-consumption`"
         >{{ number.format(consumption) }} kWh</output
       >
       <input
         :id="`${id}-consumption`"
-        v-model.number="consumption"
+        v-model.number="selectedConsumption"
         type="range"
         min="0"
         :max="maximum"

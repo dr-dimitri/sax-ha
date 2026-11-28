@@ -4154,6 +4154,12 @@ requirement_vue_tariff_comparison:
     Jahr mit Bonus und Folgejahren umschaltbar. Der Eingabewert dient als
     Bezugspunkt für die Skala und lässt sich innerhalb des Diagramms zur
     Anzeige der Kosten je Angebot variieren.
+
+    „Als PDF exportieren“ öffnet einen druckfertigen A4-Bericht mit den
+    vollständigen Angeboten, Tarifdetails, Jahreskosten und Kostenkurven für
+    das erste Jahr und die Folgejahre. Der Bericht kennzeichnet die Zahl der
+    unvollständigen Angebote und ist bei zugeklapptem Diagramm verfügbar.
+    Der Druckdialog des Browsers ermöglicht das lokale Speichern als PDF.
   acceptance_criteria:
     - "Tests prüfen einen Verbrauchswert für alle Angebote, monatliche und
        jährliche Grundgebühr, Restanteil zum Standardpreis, genau 100 % in den
@@ -4166,6 +4172,9 @@ requirement_vue_tariff_comparison:
        verschiedene Verbrauchswerte, Tabwechsel, Neuladen und Zurücksetzen.
        Der Vergleich ist unabhängig von HA-Entitäten und SAX-Gerät und ruft
        keine Dienste auf."
+    - "Der Export öffnet den Druckdialog und enthält die Tarifdetails und
+       beide Kostenkurven. Die Druckvorlage ist in Deutsch und Englisch
+       verfügbar."
 
 # ==============================================================================
 # ANFORDERUNG: VUE-ERSPARNIS UND RECORDER-AUSWERTUNG

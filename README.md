@@ -157,8 +157,10 @@ der Vergleich zum Standard-Arbeitspreis. Eine Eingabe wie `6` wird zu `06:00`.
 Beim Kopieren eines Zeitfensters werden Arbeitspreis und Verbrauchsanteil
 übernommen, Beginn und Ende gibst du neu ein. Unter **Kostenverlauf** siehst
 du, wie sich die Gesamtkosten im ersten Jahr und in den Folgejahren bei
-unterschiedlichem Verbrauch entwickeln. **Zurücksetzen** entfernt alle
-Angebote. Beim Neuladen der Seite beginnt der Vergleich leer.
+unterschiedlichem Verbrauch entwickeln. **Als PDF exportieren** öffnet den
+Druckdialog mit Tarifdetails, Jahreskosten und beiden Kostenkurven. Wähle
+dort **Als PDF speichern**. **Zurücksetzen** entfernt alle Angebote. Beim
+Neuladen der Seite beginnt der Vergleich leer.
 
 Nach einem Dashboard-Update kann unter **Einstellungen → System →
 Reparaturen** ein Hinweis erscheinen. Folge den Schritten und lade danach

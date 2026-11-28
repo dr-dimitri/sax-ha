@@ -19,6 +19,7 @@ const labels = {
     addWindow: "Zeitfenster hinzufügen",
     copyWindow: "Zeitfenster kopieren",
     window: "Zeitfenster",
+    windowTable: "Zeitfenster",
     start: "Beginn",
     end: "Ende",
     share: "Verbrauchsanteil (%)",
@@ -32,6 +33,9 @@ const labels = {
     chartFirstYear: "Erstes Jahr",
     chartLaterYears: "Folgejahre",
     chartResults: "Kosten beim ausgewählten Verbrauch",
+    exportPdf: "Als PDF exportieren",
+    incompleteReport: "Unvollständige Tarife im Formular: 1",
+    popupBlocked: "Erlaube Pop-ups für Home Assistant und versuche es erneut.",
     reset: "Zurücksetzen",
     totalShareTooHigh:
       "Die Verbrauchsanteile aller Zeitfenster dürfen zusammen höchstens 100 % betragen.",
@@ -54,6 +58,7 @@ const labels = {
     addWindow: "Add time window",
     copyWindow: "Copy time window",
     window: "Time window",
+    windowTable: "Time windows",
     start: "Start",
     end: "End",
     share: "Share of consumption (%)",
@@ -67,6 +72,9 @@ const labels = {
     chartFirstYear: "First year",
     chartLaterYears: "Subsequent years",
     chartResults: "Costs at selected consumption",
+    exportPdf: "Export as PDF",
+    incompleteReport: "Incomplete tariffs in the form: 1",
+    popupBlocked: "Allow pop-ups for Home Assistant and try again.",
     reset: "Reset",
     totalShareTooHigh:
       "The shares of all time windows together must be at most 100%.",
@@ -98,31 +106,13 @@ async function commitTime(field: Locator, time: string) {
   }, time);
 }
 
-test.beforeEach(async ({ page }, testInfo) => {
-  await page.goto("/sax-power-vue/tarifvergleich");
-  if (testInfo.project.name.endsWith("en"))
-    await page.locator("#language").click();
-  if (testInfo.project.name.includes("dark"))
-    await page.locator("#theme").click();
-});
-
-// REQ-VUE-TARIFF-COMPARISON: exercise the bundled calculator with no HA writes.
-test("table and chart compare first and later years for fixed and time-of-use tariffs", async ({
-  page,
-}, testInfo) => {
-  const english = testInfo.project.name.endsWith("en");
-  const copy = labels[english ? "en" : "de"];
-  const panel = page.locator("sax-power-vue-panel");
-  await expect(panel.getByRole("heading", { level: 1 })).toHaveText(copy.tab);
-  await panel.getByLabel(copy.consumption).fill("3600");
-
-  const fixed = await addTariff(panel, copy, "Fest 30");
-  const chartToggle = panel.getByRole("button", {
-    name: copy.chartToggle,
-    exact: true,
-  });
-  await expect(chartToggle).toBeDisabled();
-  await fixed.getByLabel(copy.price).fill(english ? "30.25" : "30,25");
+async function fillExampleTariffs(
+  panel: Locator,
+  copy: Labels,
+  fixed: Locator,
+) {
+  const separator = copy === labels.en ? "." : ",";
+  await fixed.getByLabel(copy.price).fill(`30${separator}25`);
   await fixed.getByLabel(copy.baseFee).fill("10");
   await fixed.getByLabel(copy.feePeriod).selectOption({ label: copy.monthly });
   await fixed.getByLabel(copy.bonus).fill("200");
@@ -150,10 +140,35 @@ test("table and chart compare first and later years for fixed and time-of-use ta
     );
     await enterTime(fields.getByLabel(copy.end, { exact: true }), window.end);
     await fields.getByLabel(copy.price).fill(window.price);
-    await fields
-      .getByLabel(copy.share)
-      .fill(`${window.share}${english ? "." : ","}5`);
+    await fields.getByLabel(copy.share).fill(`${window.share}${separator}5`);
   }
+}
+
+test.beforeEach(async ({ page }, testInfo) => {
+  await page.goto("/sax-power-vue/tarifvergleich");
+  if (testInfo.project.name.endsWith("en"))
+    await page.locator("#language").click();
+  if (testInfo.project.name.includes("dark"))
+    await page.locator("#theme").click();
+});
+
+// REQ-VUE-TARIFF-COMPARISON: exercise the bundled calculator with no HA writes.
+test("table and chart compare first and later years for fixed and time-of-use tariffs", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const copy = labels[english ? "en" : "de"];
+  const panel = page.locator("sax-power-vue-panel");
+  await expect(panel.getByRole("heading", { level: 1 })).toHaveText(copy.tab);
+  await panel.getByLabel(copy.consumption).fill("3600");
+
+  const fixed = await addTariff(panel, copy, "Fest 30");
+  const chartToggle = panel.getByRole("button", {
+    name: copy.chartToggle,
+    exact: true,
+  });
+  await expect(chartToggle).toBeDisabled();
+  await fillExampleTariffs(panel, copy, fixed);
 
   const comparison = panel.getByRole("table", { name: copy.results });
   const row = (name: string) =>
@@ -225,6 +240,105 @@ test("table and chart compare first and later years for fixed and time-of-use ta
   await chartToggle.click();
   await expect(chartToggle).toHaveAttribute("aria-expanded", "false");
   await expect(chart).toBeHidden();
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("PDF export prints tariff details and both annual cost charts with chart view collapsed", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const copy = labels[english ? "en" : "de"];
+  const locale = english ? "en-GB" : "de-DE";
+  const panel = page.locator("sax-power-vue-panel");
+  const fixedName = "Fest <b>30</b>";
+  const draftName = "Entwurf ohne Preis";
+  const exportButton = panel.getByRole("button", {
+    name: copy.exportPdf,
+    exact: true,
+  });
+  await panel.getByLabel(copy.consumption).fill("3600");
+  await addTariff(panel, copy, draftName);
+  await expect(exportButton).toBeDisabled();
+  await fillExampleTariffs(
+    panel,
+    copy,
+    await addTariff(panel, copy, fixedName),
+  );
+  await expect(
+    panel.getByRole("button", { name: copy.chartToggle }),
+  ).toHaveAttribute("aria-expanded", "false");
+
+  await page.evaluate(() => {
+    const open = window.open.bind(window);
+    window.open = (...args) => {
+      if (!document.body.hasAttribute("data-allow-test-popup")) return null;
+      const popup = open(...args);
+      if (popup)
+        popup.print = () => {
+          popup.document.body.dataset.printed = "true";
+        };
+      return popup;
+    };
+  });
+  await exportButton.click();
+  await expect(panel.getByRole("alert")).toHaveText(copy.popupBlocked);
+
+  await page.evaluate(() =>
+    document.body.setAttribute("data-allow-test-popup", ""),
+  );
+  const popupOpened = page.waitForEvent("popup");
+  await exportButton.click();
+  const popup = await popupOpened;
+
+  await expect(panel.getByRole("alert")).toHaveCount(0);
+  await expect(popup.locator("body")).toHaveAttribute("data-printed", "true");
+  const report = popup.locator(".tariff-comparison-print-report");
+  await expect(report.getByRole("heading", { level: 1 })).toHaveText(copy.tab);
+  await expect(
+    report.getByText(copy.incompleteReport, { exact: true }),
+  ).toBeVisible();
+  await expect(report.getByText(draftName, { exact: true })).toHaveCount(0);
+  await expect(report).toContainText(
+    `${new Intl.NumberFormat(locale).format(3600)} kWh`,
+  );
+  const summary = report.getByRole("table", { name: copy.results });
+  const currency = new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "EUR",
+  });
+  for (const [name, bonus, firstYear, laterYears] of [
+    [fixedName, -200, 1009, 1209],
+    ["Nacht & Mittag", 0, 1013.7, 1013.7],
+  ] as const) {
+    const cells = summary
+      .getByRole("row")
+      .filter({ has: popup.getByRole("rowheader", { name, exact: true }) })
+      .getByRole("cell");
+    await expect(cells.nth(-3)).toContainText(currency.format(bonus));
+    await expect(cells.nth(-2)).toContainText(currency.format(firstYear));
+    await expect(cells.last()).toContainText(currency.format(laterYears));
+  }
+  const fixed = report.getByRole("article", { name: fixedName });
+  await expect(fixed.getByText("200 €", { exact: true })).toBeVisible();
+
+  const windows = report
+    .getByRole("article", { name: "Nacht & Mittag" })
+    .getByRole("table", { name: copy.windowTable });
+  const nightWindow = windows.getByRole("row").filter({
+    has: popup.getByRole("cell", { name: "22:00" }),
+  });
+  await expect(nightWindow.getByRole("cell").nth(1)).toContainText("06:00");
+  await expect(nightWindow.getByRole("cell").nth(2)).toContainText("15");
+  await expect(nightWindow.getByRole("cell").nth(3)).toContainText(
+    new Intl.NumberFormat(locale).format(30.5),
+  );
+  await expect(windows.getByRole("cell", { name: "12:00" })).toBeVisible();
+  await expect(report.getByRole("img", { name: copy.chart })).toHaveCount(2);
+  for (const title of [copy.chartFirstYear, copy.chartLaterYears])
+    await expect(
+      report.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+  await popup.close();
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 

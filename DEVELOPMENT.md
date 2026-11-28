@@ -188,7 +188,9 @@ Standard-Arbeitspreis. Die ausgewiesenen Beträge werden auf Cent gerundet.
 `TariffComparisonCostChart.vue` zeigt die Jahreskosten für verschiedene
 Verbräuche. Die Kurven verwenden denselben gewichteten Arbeitspreis und dieselbe
 jährliche Grundgebühr wie die Vergleichstabelle. Der Bonus verschiebt die Kurve
-für das erste Jahr.
+für das erste Jahr. `TariffComparisonPrintReport.vue` verwendet dieselben
+Kurven und Berechnungen für beide Tarifjahre. Der Report wird mit separatem
+Druck-CSS in ein lokales Druckfenster übernommen.
 Die Ansicht bezieht alle Eingaben aus dem Formular und
 benötigt keine HA-Entitäten. Berechnungstests und Browserabdeckung sind in der
 [Funktionsmatrix](docs/vue-dashboard-parity.md#tarifvergleich) verlinkt.

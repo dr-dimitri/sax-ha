@@ -3,6 +3,8 @@ import { computed, nextTick, ref, useId } from "vue";
 import type { Language } from "../tabs";
 import TariffComparisonCostChart from "../components/TariffComparisonCostChart.vue";
 import TariffComparisonField from "../components/TariffComparisonField.vue";
+import TariffComparisonPrintReport from "../components/TariffComparisonPrintReport.vue";
+import printStyles from "../tariff-comparison-print.css?inline";
 import {
   calculateTariffComparison,
   validateAnnualConsumption,
@@ -44,6 +46,12 @@ const messages = {
     share: "Verbrauchsanteil (%)",
     comparison: "Jahreskosten im Vergleich",
     costChart: "Kostenverlauf",
+    exportPdf: "Als PDF exportieren",
+    preparingPdf: "Druckansicht wird vorbereitet …",
+    printTitle: "SAX Power – Tarifvergleich",
+    printAction: "Drucken oder als PDF speichern",
+    popupBlocked: "Erlaube Pop-ups für Home Assistant und versuche es erneut.",
+    printFailed: "Die Druckansicht konnte nicht geöffnet werden.",
     noValidTariffs:
       "Vervollständige einen Tarif, um seinen Kostenverlauf zu sehen.",
     costItem: "Kostenpunkt",
@@ -100,6 +108,12 @@ const messages = {
     share: "Share of consumption (%)",
     comparison: "Annual cost comparison",
     costChart: "Cost trends",
+    exportPdf: "Export as PDF",
+    preparingPdf: "Preparing print view …",
+    printTitle: "SAX Power – Tariff comparison",
+    printAction: "Print or save as PDF",
+    popupBlocked: "Allow pop-ups for Home Assistant and try again.",
+    printFailed: "The print view could not be opened.",
     noValidTariffs:
       "Complete a tariff to see how its costs change with consumption.",
     costItem: "Cost item",
@@ -155,6 +169,9 @@ const addButton = ref<HTMLButtonElement>();
 const annualConsumption = ref("");
 const drafts = ref<TariffDraft[]>([]);
 const showCostChart = ref(false);
+const printContent = ref<HTMLElement>();
+const preparingPdf = ref(false);
+const exportError = ref<"popupBlocked" | "printFailed">();
 let serial = 0;
 let tariffNumber = 0;
 
@@ -165,21 +182,20 @@ const comparisons = computed(() =>
     result: calculateTariffComparison(annualConsumption.value, tariff),
   })),
 );
-const chartTariffs = computed(() =>
+const validComparisons = computed(() =>
   comparisons.value.flatMap(({ tariff, name, result }) =>
-    result.valid
-      ? [
-          {
-            id: tariff.id,
-            name,
-            firstYearAtZero: result.firstYearAtZero,
-            standardAtZero: result.standardAtZero,
-            annualCostPerKwh: result.annualCostPerKwh,
-            costAtConsumption: result.costAtConsumption,
-          },
-        ]
-      : [],
+    result.valid ? [{ id: tariff.id, tariff, name, result }] : [],
   ),
+);
+const chartTariffs = computed(() =>
+  validComparisons.value.map(({ id, name, result }) => ({
+    id,
+    name,
+    firstYearAtZero: result.firstYearAtZero,
+    standardAtZero: result.standardAtZero,
+    annualCostPerKwh: result.annualCostPerKwh,
+    costAtConsumption: result.costAtConsumption,
+  })),
 );
 const chartConsumption = computed(() =>
   Number(annualConsumption.value.replace(",", ".")),
@@ -257,6 +273,7 @@ function removeTariff(tariff: TariffDraft): void {
   if (nearby) focusField(`${nearby.id}-name`);
   else {
     showCostChart.value = false;
+    exportError.value = undefined;
     addButton.value?.focus();
   }
 }
@@ -269,8 +286,57 @@ function removeWindow(tariff: TariffDraft, index: number): void {
 function reset(): void {
   drafts.value = [];
   showCostChart.value = false;
+  exportError.value = undefined;
   tariffNumber = 0;
   addButton.value?.focus();
+}
+
+async function exportPdf(): Promise<void> {
+  if (preparingPdf.value || !validComparisons.value.length) return;
+  exportError.value = undefined;
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    exportError.value = "popupBlocked";
+    return;
+  }
+  preparingPdf.value = true;
+  try {
+    await nextTick();
+    const report = printContent.value?.firstElementChild;
+    if (popup.closed) return;
+    if (!report) {
+      exportError.value = "printFailed";
+      popup.close();
+      return;
+    }
+
+    const printDocument = popup.document;
+    printDocument.title = text.value.printTitle;
+    printDocument.documentElement.lang = props.language;
+    const viewport = printDocument.createElement("meta");
+    viewport.name = "viewport";
+    viewport.content = "width=device-width, initial-scale=1";
+    const style = printDocument.createElement("style");
+    style.textContent = printStyles;
+    printDocument.head.append(viewport, style);
+    const print = printDocument.createElement("button");
+    print.type = "button";
+    print.className = "tariff-print-action";
+    print.textContent = text.value.printAction;
+    print.addEventListener("click", () => popup.print());
+    printDocument.body.replaceChildren(
+      print,
+      printDocument.importNode(report, true),
+    );
+    popup.opener = null;
+    popup.focus();
+    popup.print();
+  } catch {
+    exportError.value = "printFailed";
+    popup.close();
+  } finally {
+    preparingPdf.value = false;
+  }
 }
 </script>
 
@@ -303,6 +369,15 @@ function reset(): void {
         >
           {{ text.costChart }}
         </button>
+        <button
+          v-if="drafts.length"
+          type="button"
+          :disabled="preparingPdf || !validComparisons.length"
+          :aria-busy="preparingPdf"
+          @click="exportPdf"
+        >
+          {{ preparingPdf ? text.preparingPdf : text.exportPdf }}
+        </button>
         <button type="button" :disabled="!drafts.length" @click="reset">
           {{ text.reset }}
         </button>
@@ -310,6 +385,16 @@ function reset(): void {
     </div>
     <p v-if="!drafts.length" class="hint">{{ text.noTariffs }}</p>
     <p v-else class="hint">{{ text.pricesHint }}</p>
+    <p v-if="exportError" class="error" role="alert">{{ text[exportError] }}</p>
+
+    <div v-if="preparingPdf" ref="printContent" hidden>
+      <TariffComparisonPrintReport
+        :language="language"
+        :annual-consumption="chartConsumption"
+        :tariffs="validComparisons"
+        :incomplete-count="drafts.length - validComparisons.length"
+      />
+    </div>
 
     <div v-if="drafts.length" v-show="showCostChart" :id="`${id}-cost-chart`">
       <TariffComparisonCostChart

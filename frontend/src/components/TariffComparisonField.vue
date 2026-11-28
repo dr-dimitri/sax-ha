@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { normalizeTime } from "../time";
+import { normalizeComparisonTime } from "../tariff-comparison";
 
 const props = defineProps<{
   id: string;
@@ -16,7 +16,11 @@ const showError = computed(
 
 function commit(event: Event): void {
   const input = event.currentTarget as HTMLInputElement;
-  value.value = props.time ? normalizeTime(input.value) : input.value;
+  const committed = props.time
+    ? normalizeComparisonTime(input.value)
+    : input.value;
+  if (input.value !== committed) input.value = committed;
+  value.value = committed;
   visited.value = true;
 }
 </script>

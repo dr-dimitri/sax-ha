@@ -17,6 +17,7 @@ const labels = {
     annual: "Pro Jahr",
     bonus: "Einmaliger Bonus (€)",
     addWindow: "Zeitfenster hinzufügen",
+    copyWindow: "Zeitfenster kopieren",
     window: "Zeitfenster",
     start: "Beginn",
     end: "Ende",
@@ -25,6 +26,12 @@ const labels = {
     standardConsumption: "Verbrauch zum Standardpreis",
     firstYear: "Kosten im ersten Jahr",
     laterYears: "Kosten pro Folgejahr",
+    chartToggle: "Kostenverlauf",
+    chart: "Jahreskosten nach Stromverbrauch",
+    chartConsumption: "Jahresverbrauch im Diagramm (kWh)",
+    chartFirstYear: "Erstes Jahr",
+    chartLaterYears: "Folgejahre",
+    chartResults: "Kosten beim ausgewählten Verbrauch",
     reset: "Zurücksetzen",
     totalShareTooHigh:
       "Die Verbrauchsanteile aller Zeitfenster dürfen zusammen höchstens 100 % betragen.",
@@ -45,6 +52,7 @@ const labels = {
     annual: "Per year",
     bonus: "One-time bonus (€)",
     addWindow: "Add time window",
+    copyWindow: "Copy time window",
     window: "Time window",
     start: "Start",
     end: "End",
@@ -53,6 +61,12 @@ const labels = {
     standardConsumption: "Consumption at standard price",
     firstYear: "First-year cost",
     laterYears: "Cost per subsequent year",
+    chartToggle: "Cost trends",
+    chart: "Annual costs by electricity consumption",
+    chartConsumption: "Annual consumption in chart (kWh)",
+    chartFirstYear: "First year",
+    chartLaterYears: "Subsequent years",
+    chartResults: "Costs at selected consumption",
     reset: "Reset",
     totalShareTooHigh:
       "The shares of all time windows together must be at most 100%.",
@@ -69,11 +83,11 @@ async function addTariff(panel: Locator, copy: Labels, name: string) {
   return panel.getByRole("article", { name, exact: true });
 }
 
-async function enterTime(field: Locator, time: string) {
+async function enterTime(field: Locator, time: string, expected = time) {
   await field.fill("");
   await field.pressSequentially(time);
   await field.press("Tab");
-  await expect(field).toHaveValue(time);
+  await expect(field).toHaveValue(expected);
 }
 
 async function commitTime(field: Locator, time: string) {
@@ -93,7 +107,7 @@ test.beforeEach(async ({ page }, testInfo) => {
 });
 
 // REQ-VUE-TARIFF-COMPARISON: exercise the bundled calculator with no HA writes.
-test("fixed and time-of-use tariffs compare first and later years from the same consumption", async ({
+test("table and chart compare first and later years for fixed and time-of-use tariffs", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -103,6 +117,11 @@ test("fixed and time-of-use tariffs compare first and later years from the same 
   await panel.getByLabel(copy.consumption).fill("3600");
 
   const fixed = await addTariff(panel, copy, "Fest 30");
+  const chartToggle = panel.getByRole("button", {
+    name: copy.chartToggle,
+    exact: true,
+  });
+  await expect(chartToggle).toBeDisabled();
   await fixed.getByLabel(copy.price).fill(english ? "30.25" : "30,25");
   await fixed.getByLabel(copy.baseFee).fill("10");
   await fixed.getByLabel(copy.feePeriod).selectOption({ label: copy.monthly });
@@ -170,6 +189,42 @@ test("fixed and time-of-use tariffs compare first and later years from the same 
     await expect(cells.nth(0)).toContainText(currency.format(expected[0]));
     await expect(cells.nth(1)).toContainText(currency.format(expected[1]));
   }
+
+  const chart = panel.getByRole("img", { name: copy.chart, exact: true });
+  await expect(chart).toBeHidden();
+  await chartToggle.click();
+  await expect(chartToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(chart).toBeVisible();
+  const chartResult = panel.getByRole("list", { name: copy.chartResults });
+  const expectedChartCosts = async (
+    fixedCost: number,
+    variableCost: number,
+  ) => {
+    for (const [name, amount] of [
+      ["Fest 30", fixedCost],
+      ["Nacht & Mittag", variableCost],
+    ] as const) {
+      const item = chartResult.getByRole("listitem").filter({ hasText: name });
+      await expect(item).toContainText(currency.format(amount));
+    }
+  };
+  await expect(
+    panel.getByRole("radio", { name: copy.chartFirstYear, exact: true }),
+  ).toBeChecked();
+  const chartConsumption = panel.getByRole("slider", {
+    name: copy.chartConsumption,
+  });
+  await expect(chartConsumption).toHaveValue("3600");
+  await expectedChartCosts(1009, 1013.7);
+  await chartConsumption.press("Home");
+  await expect(chartConsumption).toHaveValue("0");
+  await expectedChartCosts(-80, 84);
+  await panel.getByRole("radio", { name: copy.chartLaterYears }).check();
+  await expectedChartCosts(120, 84);
+  await expect(panel.getByLabel(copy.consumption)).toHaveValue("3600");
+  await chartToggle.click();
+  await expect(chartToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(chart).toBeHidden();
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
@@ -196,26 +251,28 @@ test("incomplete and conflicting window inputs keep their drafts and resetting c
     exact: true,
   });
   const firstStart = first.getByLabel(copy.start, { exact: true });
-  await firstStart.pressSequentially("22");
-  await firstStart.press("Tab");
-  await expect(firstStart).toHaveValue("22");
+  await enterTime(firstStart, "22:");
   await expect(firstStart).toHaveAttribute("aria-invalid", "true");
-  await enterTime(firstStart, "22:00");
+  await enterTime(firstStart, "22", "22:00");
   await expect(firstStart).not.toHaveAttribute("aria-invalid", "true");
-  await enterTime(first.getByLabel(copy.end, { exact: true }), "06:00");
+  await enterTime(first.getByLabel(copy.end, { exact: true }), "6", "06:00");
   await first.getByLabel(copy.price).fill("10");
   await first.getByLabel(copy.share).fill("60");
 
   const secondStart = second.getByLabel(copy.start, { exact: true });
   const secondEnd = second.getByLabel(copy.end, { exact: true });
-  await enterTime(secondStart, "00:00");
+  await enterTime(secondStart, "0", "00:00");
   await enterTime(secondEnd, "08:00");
   await second.getByLabel(copy.price).fill("15");
   await second.getByLabel(copy.share).fill("40");
   await expect(secondStart).toHaveAttribute("aria-invalid", "true");
-  await commitTime(secondStart, "06:00");
+  await commitTime(secondStart, "06");
+  await expect(secondStart).toHaveValue("06:00");
   await expect(secondStart).not.toHaveAttribute("aria-invalid", "true");
-  await commitTime(secondEnd, "06:00");
+  await commitTime(secondStart, "6");
+  await expect(secondStart).toHaveValue("06:00");
+  await commitTime(secondEnd, "6");
+  await expect(secondEnd).toHaveValue("06:00");
   await expect(secondEnd).toHaveAttribute("aria-invalid", "true");
   await enterTime(secondEnd, "08:00");
   await expect(secondEnd).not.toHaveAttribute("aria-invalid", "true");
@@ -251,5 +308,65 @@ test("incomplete and conflicting window inputs keep their drafts and resetting c
     0,
   );
   await expect(panel.getByLabel(labels.de.consumption)).toHaveValue("");
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("copying a peak-price window clears its times and keeps its price and consumption share", async ({
+  page,
+}, testInfo) => {
+  const english = testInfo.project.name.endsWith("en");
+  const copy = labels[english ? "en" : "de"];
+  const panel = page.locator("sax-power-vue-panel");
+  await panel.getByLabel(copy.consumption).fill("1000");
+  const tariff = await addTariff(panel, copy, "Tag und Nacht");
+  await tariff.getByLabel(copy.type).selectOption({ label: copy.timeOfUse });
+  await tariff.getByLabel(copy.standardPrice).fill("30");
+  await tariff.getByLabel(copy.baseFee).fill("0");
+  await tariff.getByRole("button", { name: copy.addWindow }).click();
+
+  const window = (number: number) =>
+    tariff.getByRole("group", {
+      name: `${copy.window} ${number}`,
+      exact: true,
+    });
+  const start = (number: number) =>
+    window(number).getByLabel(copy.start, { exact: true });
+  const end = (number: number) =>
+    window(number).getByLabel(copy.end, { exact: true });
+  await enterTime(start(1), "7", "07:00");
+  await enterTime(end(1), "9", "09:00");
+  await window(1).getByLabel(copy.price).fill("45");
+  await window(1).getByLabel(copy.share).fill("25");
+  await enterTime(start(2), "0", "00:00");
+  await enterTime(end(2), "6", "06:00");
+  await window(2).getByLabel(copy.price).fill("18");
+  await window(2).getByLabel(copy.share).fill("10");
+
+  const currency = new Intl.NumberFormat(english ? "en-GB" : "de-DE", {
+    style: "currency",
+    currency: "EUR",
+  });
+  const total = panel
+    .getByRole("table", { name: copy.results })
+    .getByRole("row")
+    .filter({ has: page.getByRole("rowheader", { name: copy.laterYears }) })
+    .getByRole("cell");
+  await expect(total).toHaveText(currency.format(325.5));
+
+  await window(1).getByRole("button", { name: copy.copyWindow }).click();
+  await expect(start(1)).toHaveValue("07:00");
+  await expect(end(1)).toHaveValue("09:00");
+  await expect(start(2)).toBeFocused();
+  await expect(start(2)).toHaveValue("");
+  await expect(end(2)).toHaveValue("");
+  await expect(window(2).getByLabel(copy.price)).toHaveValue("45");
+  await expect(window(2).getByLabel(copy.share)).toHaveValue("25");
+  await expect(start(3)).toHaveValue("00:00");
+  await expect(end(3)).toHaveValue("06:00");
+  await expect(total).toHaveText("—");
+
+  await enterTime(start(2), "17", "17:00");
+  await enterTime(end(2), "19", "19:00");
+  await expect(total).toHaveText(currency.format(363));
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });

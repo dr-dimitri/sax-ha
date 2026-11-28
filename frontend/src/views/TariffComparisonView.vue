@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, useId } from "vue";
 import type { Language } from "../tabs";
+import TariffComparisonCostChart from "../components/TariffComparisonCostChart.vue";
 import TariffComparisonField from "../components/TariffComparisonField.vue";
 import {
   calculateTariffComparison,
@@ -33,14 +34,18 @@ const messages = {
     pricesHint:
       "Preise inklusive Steuern eingeben. Zahlen ohne Tausendertrennzeichen eingeben.",
     windowsHint:
-      "Die Zeitfenster gelten täglich. Uhrzeiten im Format 22:30 oder 2230 eingeben. Die Anteile beziehen sich auf den Jahresverbrauch. Für den übrigen Verbrauch gilt der Standardpreis.",
+      "Die Zeitfenster gelten täglich. Gib eine Uhrzeit wie 22, 2230 oder 22:30 ein. Die Anteile beziehen sich auf den Jahresverbrauch. Für den übrigen Verbrauch gilt der Standardpreis.",
     window: "Zeitfenster",
     addWindow: "Zeitfenster hinzufügen",
+    copyWindow: "Zeitfenster kopieren",
     removeWindow: "Zeitfenster entfernen",
     start: "Beginn",
     end: "Ende",
     share: "Verbrauchsanteil (%)",
     comparison: "Jahreskosten im Vergleich",
+    costChart: "Kostenverlauf",
+    noValidTariffs:
+      "Vervollständige einen Tarif, um seinen Kostenverlauf zu sehen.",
     costItem: "Kostenpunkt",
     standardShare: "Verbrauch zum Standardpreis",
     annualEnergyCost: "Verbrauchskosten pro Jahr",
@@ -56,14 +61,13 @@ const messages = {
       invalidNumber: "Bitte gib eine gültige Zahl ein.",
       negative: "Der Wert muss mindestens 0 sein.",
       outOfRange: "Der Wert ist zu groß.",
-      invalidTime: "Bitte gib eine vollständige Uhrzeit ein, z. B. 22:30.",
+      invalidTime: "Bitte gib eine gültige Uhrzeit ein, z. B. 22 oder 22:30.",
       sameTime: "Beginn und Ende müssen unterschiedlich sein.",
       overlap: "Dieses Zeitfenster überschneidet sich mit einem anderen.",
-      notDiscounted: "Der Arbeitspreis muss unter dem Standardpreis liegen.",
       shareTooHigh: "Der Verbrauchsanteil darf höchstens 100 % betragen.",
       totalShareTooHigh:
         "Die Verbrauchsanteile aller Zeitfenster dürfen zusammen höchstens 100 % betragen.",
-      missingWindow: "Füge mindestens ein vergünstigtes Zeitfenster hinzu.",
+      missingWindow: "Füge mindestens ein Zeitfenster hinzu.",
     },
   },
   en: {
@@ -86,14 +90,18 @@ const messages = {
     pricesHint:
       "Enter prices including taxes and numbers without thousands separators.",
     windowsHint:
-      "Time windows apply every day. Enter times as 22:30 or 2230. Each share is a percentage of annual consumption. Remaining consumption is billed at the standard price.",
+      "Time windows apply every day. Enter times such as 22, 2230 or 22:30. Each share is a percentage of annual consumption. Remaining consumption is billed at the standard price.",
     window: "Time window",
     addWindow: "Add time window",
+    copyWindow: "Copy time window",
     removeWindow: "Remove time window",
     start: "Start",
     end: "End",
     share: "Share of consumption (%)",
     comparison: "Annual cost comparison",
+    costChart: "Cost trends",
+    noValidTariffs:
+      "Complete a tariff to see how its costs change with consumption.",
     costItem: "Cost item",
     standardShare: "Consumption at standard price",
     annualEnergyCost: "Annual energy cost",
@@ -109,14 +117,13 @@ const messages = {
       invalidNumber: "Enter a valid number.",
       negative: "The value must be at least 0.",
       outOfRange: "The value is too large.",
-      invalidTime: "Enter a complete time, e.g. 22:30.",
+      invalidTime: "Enter a valid time, e.g. 22 or 22:30.",
       sameTime: "Start and end times must differ.",
       overlap: "This time window overlaps another one.",
-      notDiscounted: "The unit price must be below the standard price.",
       shareTooHigh: "The share of consumption must be at most 100%.",
       totalShareTooHigh:
         "The shares of all time windows together must be at most 100%.",
-      missingWindow: "Add at least one discounted time window.",
+      missingWindow: "Add at least one time window.",
     },
   },
 } as const;
@@ -147,6 +154,7 @@ const view = ref<HTMLElement>();
 const addButton = ref<HTMLButtonElement>();
 const annualConsumption = ref("");
 const drafts = ref<TariffDraft[]>([]);
+const showCostChart = ref(false);
 let serial = 0;
 let tariffNumber = 0;
 
@@ -156,6 +164,25 @@ const comparisons = computed(() =>
     name: tariff.name.trim() || `${text.value.tariff} ${tariff.number}`,
     result: calculateTariffComparison(annualConsumption.value, tariff),
   })),
+);
+const chartTariffs = computed(() =>
+  comparisons.value.flatMap(({ tariff, name, result }) =>
+    result.valid
+      ? [
+          {
+            id: tariff.id,
+            name,
+            firstYearAtZero: result.firstYearAtZero,
+            standardAtZero: result.standardAtZero,
+            annualCostPerKwh: result.annualCostPerKwh,
+            costAtConsumption: result.costAtConsumption,
+          },
+        ]
+      : [],
+  ),
+);
+const chartConsumption = computed(() =>
+  Number(annualConsumption.value.replace(",", ".")),
 );
 const consumptionId = `${id}-consumption`;
 const consumptionError = computed(() =>
@@ -198,21 +225,28 @@ function addTariff(): void {
   focusField(`${tariffId}-name`);
 }
 
-function addWindow(tariff: TariffDraft, focus = true): void {
+function addWindow(
+  tariff: TariffDraft,
+  {
+    index = tariff.windows.length,
+    source,
+    focus = true,
+  }: { index?: number; source?: WindowDraft; focus?: boolean } = {},
+): void {
   const windowId = `${id}-window-${++serial}`;
-  tariff.windows.push({
+  tariff.windows.splice(index, 0, {
     id: windowId,
     start: "",
     end: "",
-    price: "",
-    share: "",
+    price: source?.price ?? "",
+    share: source?.share ?? "",
   });
   if (focus) focusField(`${windowId}-start`);
 }
 
 function changeType(tariff: TariffDraft): void {
   if (tariff.type === "time-of-use" && !tariff.windows.length) {
-    addWindow(tariff, false);
+    addWindow(tariff, { focus: false });
   }
 }
 
@@ -221,7 +255,10 @@ function removeTariff(tariff: TariffDraft): void {
   drafts.value.splice(index, 1);
   const nearby = drafts.value[index] ?? drafts.value[index - 1];
   if (nearby) focusField(`${nearby.id}-name`);
-  else addButton.value?.focus();
+  else {
+    showCostChart.value = false;
+    addButton.value?.focus();
+  }
 }
 
 function removeWindow(tariff: TariffDraft, index: number): void {
@@ -231,6 +268,7 @@ function removeWindow(tariff: TariffDraft, index: number): void {
 
 function reset(): void {
   drafts.value = [];
+  showCostChart.value = false;
   tariffNumber = 0;
   addButton.value?.focus();
 }
@@ -255,6 +293,16 @@ function reset(): void {
         >
           {{ text.addTariff }}
         </button>
+        <button
+          v-if="drafts.length"
+          type="button"
+          :aria-expanded="showCostChart"
+          :aria-controls="`${id}-cost-chart`"
+          :disabled="!showCostChart && !chartTariffs.length"
+          @click="showCostChart = !showCostChart"
+        >
+          {{ text.costChart }}
+        </button>
         <button type="button" :disabled="!drafts.length" @click="reset">
           {{ text.reset }}
         </button>
@@ -262,6 +310,18 @@ function reset(): void {
     </div>
     <p v-if="!drafts.length" class="hint">{{ text.noTariffs }}</p>
     <p v-else class="hint">{{ text.pricesHint }}</p>
+
+    <div v-if="drafts.length" v-show="showCostChart" :id="`${id}-cost-chart`">
+      <TariffComparisonCostChart
+        v-if="showCostChart && chartTariffs.length"
+        :language="language"
+        :annual-consumption="chartConsumption"
+        :tariffs="chartTariffs"
+      />
+      <p v-else-if="showCostChart" class="hint" role="status">
+        {{ text.noValidTariffs }}
+      </p>
+    </div>
 
     <div v-if="drafts.length" class="tariffs">
       <article
@@ -339,9 +399,17 @@ function reset(): void {
                 "
               />
             </div>
-            <button type="button" @click="removeWindow(tariff, index)">
-              {{ text.removeWindow }}
-            </button>
+            <div class="actions">
+              <button
+                type="button"
+                @click="addWindow(tariff, { index: index + 1, source: window })"
+              >
+                {{ text.copyWindow }}
+              </button>
+              <button type="button" @click="removeWindow(tariff, index)">
+                {{ text.removeWindow }}
+              </button>
+            </div>
           </fieldset>
           <p v-if="!result.valid && result.errors.windows" class="error">
             {{ text.errors[result.errors.windows] }}

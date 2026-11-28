@@ -38,7 +38,7 @@ test("production module runs independently in a browser context", async () => {
     const root = element.shadowRoot;
     assert.equal(root.querySelector(".header").textContent.trim(), "SAX Power");
     assert.equal(root.querySelector("h1").textContent.trim(), "Amortisation");
-    assert.equal(root.querySelectorAll("nav a").length, 4);
+    assert.equal(root.querySelectorAll("nav a").length, 5);
     assert.match(
       [...root.querySelectorAll("style")]
         .map((style) => style.textContent)
@@ -58,6 +58,15 @@ test("production module runs independently in a browser context", async () => {
       root.querySelector("h1").textContent.trim(),
       "Electricity tariff",
     );
+    root.querySelector('nav a[href="/sax-power-vue/tarifvergleich"]').click();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(window.location.pathname, "/sax-power-vue/tarifvergleich");
+    assert.equal(
+      root.querySelector("h1").textContent.trim(),
+      "Tariff comparison",
+    );
+    assert.ok(root.querySelector(".tariff-comparison-view input"));
 
     const calls = [];
     const unsubscribe = () => {};

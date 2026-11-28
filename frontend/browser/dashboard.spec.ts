@@ -66,7 +66,7 @@ test("device information shows the reported capacity and live availability", asy
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
-test("compact views retain readable controls and all entities across available panel widths", async ({
+test("compact device views retain readable controls and entities across available panel widths", async ({
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
@@ -88,7 +88,7 @@ test("compact views retain readable controls and all entities across available p
   );
 
   for (const tab of tabs) {
-    if (tab.path === "stromtarif") continue;
+    if (tab.path === "stromtarif" || tab.path === "tarifvergleich") continue;
     await panel.locator(`nav a[href='/sax-power-vue/${tab.path}']`).click();
     if (tab.path === "ersparnis")
       await expect(panel.locator(".savings-chart")).toBeVisible();
@@ -462,7 +462,7 @@ test("storage requires confirmation in both directions and cancellation keeps th
   }
 });
 
-test("one dashboard with four complete views, local assets and responsive screenshots", async ({
+test("one dashboard with five complete views, local assets and responsive screenshots", async ({
   page,
 }, testInfo) => {
   const panel = page.locator("sax-power-vue-panel");
@@ -472,12 +472,14 @@ test("one dashboard with four complete views, local assets and responsive screen
       ? [
           "Allgemeine Informationen",
           "Stromtarif",
+          "Tarifvergleich",
           "Netzdienliches Laden",
           "Amortisation",
         ]
       : [
           "General information",
           "Electricity tariff",
+          "Tariff comparison",
           "Grid-serving charging",
           "Amortization",
         ],
@@ -489,6 +491,7 @@ test("one dashboard with four complete views, local assets and responsive screen
   ).toEqual([
     "/sax-power-vue/allgemein",
     "/sax-power-vue/stromtarif",
+    "/sax-power-vue/tarifvergleich",
     "/sax-power-vue/netzdienliches-laden",
     "/sax-power-vue/ersparnis",
   ]);
@@ -521,6 +524,12 @@ test("one dashboard with four complete views, local assets and responsive screen
     );
     if (tab.path === "ersparnis") {
       await expect(panel.locator(".savings-chart")).toBeVisible();
+    } else if (tab.path === "tarifvergleich") {
+      await expect(
+        panel.getByLabel(
+          language === "de" ? /^Jahresverbrauch/ : /^Annual consumption/,
+        ),
+      ).toBeVisible();
     } else {
       await expect(
         panel.locator(".entity-control input, .entity-control select").first(),
@@ -1389,7 +1398,7 @@ for (const legacyPath of ["ladeautomatik", "dynamisches-laden"]) {
       "href",
       "/sax-power-vue/stromtarif",
     );
-    await expect(panel.locator("nav a")).toHaveCount(4);
+    await expect(panel.locator("nav a")).toHaveCount(5);
     await expect(panel.locator(`nav a[href$='/${legacyPath}']`)).toHaveCount(0);
     await page.reload();
     await expect(panel.locator(".electricity-tariff-view")).toBeVisible();

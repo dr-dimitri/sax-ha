@@ -15,6 +15,7 @@ export default defineConfig({
     {
       name: "webkit-light-de",
       testMatch: [
+        "tariff-comparison.spec.ts",
         "tariff-editor.spec.ts",
         "fixed-time-charging.spec.ts",
         "time-window.spec.ts",
@@ -28,7 +29,11 @@ export default defineConfig({
     },
     {
       name: "webkit-light-en",
-      testMatch: ["number-input.spec.ts", "fixed-time-charging.spec.ts"],
+      testMatch: [
+        "tariff-comparison.spec.ts",
+        "number-input.spec.ts",
+        "fixed-time-charging.spec.ts",
+      ],
       use: {
         ...devices["Desktop Safari"],
         locale: "en-GB",

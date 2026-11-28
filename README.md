@@ -105,12 +105,14 @@ keine zusätzliche Installation. Auch eine früher gespeicherte Abwahl entfällt
 Preise und Zeitfenster eines zeitvariablen Tarifs bearbeitest du direkt unter
 **Stromtarif → Preise & Zeiten → Bearbeiten**.
 
-Die Screenshots zeigen die aktuelle Oberfläche mit vier Bereichen und Beispieldaten: am Computer auf Deutsch im hellen Design, auf dem Smartphone auf Englisch im dunklen Design.
+Die Screenshots zeigen Bereiche des Dashboards mit Beispieldaten, am Computer
+auf Deutsch im hellen Design und auf dem Smartphone auf Englisch im dunklen Design.
 
 | Bereich | Das findest du dort |
 | --- | --- |
 | Allgemeine Informationen | Ladezustand, Leistung, Temperatur, Energiezähler und Speicherschalter |
 | Stromtarif | Aktiven Tarif wählen, Tagespreise vergleichen, Tarifpreise und automatische Netzladung einstellen |
+| Tarifvergleich | Jahreskosten manuell eingegebener Fixpreis- und Zeitfenstertarife vergleichen |
 | Netzdienliches Laden | PV-Ladepause, PV-Sensor auswählen, Monate und Prognoseschwelle |
 | Amortisation | Netto-Ersparnis, Tarifplan und Auswertung eigener Zeiträume |
 
@@ -145,6 +147,15 @@ du bei Bedarf aufklappen.
 </p>
 
 </details>
+
+Unter **Tarifvergleich** trägst du den Jahresverbrauch einmal für alle Angebote
+in kWh ein. Pro Angebot gibst du den Brutto-Arbeitspreis in ct/kWh, die
+Grundgebühr in €/Monat oder €/Jahr und bei Bedarf einen einmaligen Bonus ein.
+Vergünstigte tägliche Zeitfenster können über Mitternacht laufen. Gib für jedes
+Fenster an, wie viel Prozent des Jahresverbrauchs darauf entfallen. Den Rest
+berechnet der Vergleich zum Standard-Arbeitspreis. Du siehst die Gesamtkosten im
+ersten Jahr und pro Folgejahr. **Zurücksetzen** entfernt alle Angebote. Beim
+Neuladen der Seite beginnt der Vergleich leer.
 
 Nach einem Dashboard-Update kann unter **Einstellungen → System →
 Reparaturen** ein Hinweis erscheinen. Folge den Schritten und lade danach

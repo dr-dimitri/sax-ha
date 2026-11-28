@@ -120,7 +120,7 @@ frontend/             Vue-/TypeScript-Quellen, Build, Komponenten-/Browser-Tests
 Home Assistants `panel_custom` unter `/sax-power-vue` ein. Grundlage ist die
 in `hacs.json` angegebene HA-Mindestversion. Der Panel-Adapter erhält
 `hass`, `narrow`, `panel` und `route` vom HA-Frontend; `panel.config.entry_id`
-ordnet die Entity-Anbindung dem Config Entry zu. Die vier navigierbaren Views
+ordnet die Entity-Anbindung dem Config Entry zu. Die fünf navigierbaren Views
 unter `frontend/src/views/` bilden das einzige mitgelieferte Dashboard **SAX Power**.
 Der technische Pfad `/sax-power-vue`, das Custom Element und die bestehenden
 Config-Schlüssel bleiben kompatibel; UI-Name und Aktivierungsoption tragen
@@ -130,6 +130,7 @@ keine Vue-/Vorschaukennzeichnung.
 | --- | --- | --- |
 | `GeneralView.vue` | `REQ-VUE-GENERAL` | Skalen, Live-Messwerte, Speicherschalter, Max-SOC und optionale Gerätedaten. |
 | `ElectricityTariffView.vue` | `REQ-VUE-ELECTRICITY-TARIFF` | Gemeinsame Tarifwahl, Tagespreiskurve und kompakt bearbeitbare Tarif-/Ladeeinstellungen für zeitvariablen und dynamischen Tarif. |
+| `TariffComparisonView.vue` | `REQ-VUE-TARIFF-COMPARISON` | Lokaler Jahreskostenvergleich mit manuellen Angeboten, Verbrauchsanteilen und einmaligem Bonus. |
 | `GridServingView.vue` | `REQ-VUE-CHARGING` | Ladepause, dynamisch benannte PV-Prognose, Schwelle, Status und Monate. |
 | `SavingsView.vue` | `REQ-VUE-SAVINGS` | Amortisation, gemeinsame Tarifpreisfenster, Kalenderwerte und freie Recorder-Auswertung. |
 
@@ -170,12 +171,23 @@ Die Zeile heißt **PV-Ertragsprognose** und unterscheidet Warten, Ertragswert un
 Abruffehler. Der Anzeigecache ist unabhängig von den weiterhin strikt geprüften
 Prognosen der Ladeplanung (siehe `REQ-VUE-ELECTRICITY-TARIFF`).
 
-Die Vue-Navigation folgt dieser Reihenfolge: Allgemeine Informationen,
-Stromtarif (EN: Electricity tariff), Netzdienliches Laden, Amortisation.
+Die Vue-Navigation zeigt Allgemeine Informationen, Stromtarif (EN: Electricity
+tariff), Tarifvergleich (EN: Tariff comparison), Netzdienliches Laden und
+Amortisation in dieser Reihenfolge.
 Die alten Pfade `dynamisches-laden` und `ladeautomatik` werden ohne Schreibaktion
 und ohne zusätzlichen History-Eintrag nach `stromtarif` weitergeleitet.
 Die früheren separaten Tarifansichten und ihre Entwicklungsvorschau sind entfernt.
 Entity-Schlüssel und bestehende Steuerparameter bleiben erhalten.
+
+`TariffComparisonView.vue` verwaltet den Vergleich im Zustand des geöffneten
+Panels. Vue hält die Ansicht beim Tabwechsel im Speicher. Die
+Berechnungslogik in `frontend/src/tariff-comparison.ts` gewichtet die
+Arbeitspreise der täglichen Zeitfenster nach den eingegebenen Anteilen am
+gemeinsamen Jahresverbrauch und berechnet den übrigen Verbrauch zum
+Standard-Arbeitspreis. Die ausgewiesenen Beträge werden auf Cent gerundet.
+Die Ansicht bezieht alle Eingaben aus dem Formular und
+benötigt keine HA-Entitäten. Berechnungstests und Browserabdeckung sind in der
+[Funktionsmatrix](docs/vue-dashboard-parity.md#tarifvergleich) verlinkt.
 
 `ChargingLayout.vue` stellt die Karten für netzdienliches Laden dar und filtert
 leere Karten. `EntityControl` und `EntityValue` werden mit der allgemeinen
@@ -245,10 +257,10 @@ HA-Verbindung übernimmt Anmeldung und Abmeldung; der Befehl liest keine
 Geräteregister und stellt keine eigene Schreibschnittstelle bereit.
 
 `frontend/src/ha.ts` verbindet diese Metadaten mit den reaktiven `hass.states`
-und stellt einen gemeinsamen Kontext für alle vier Ansichten bereit. HA
-formatiert Zustände; fehlende, unbekannte und nicht verfügbare Werte erhalten
-keine erfundenen Ersatzwerte. Verbindungswechsel melden Metadaten erneut an,
-ohne Schreibaktionen zu wiederholen. `EntityValue.vue` zeigt bestätigte Werte;
+und stellt einen gemeinsamen Kontext für die vier gerätebezogenen Ansichten
+bereit. HA formatiert Zustände. Fehlende, unbekannte und nicht verfügbare
+Werte erhalten keine erfundenen Ersatzwerte. Verbindungswechsel melden
+Metadaten erneut an, ohne Schreibaktionen zu wiederholen. `EntityValue.vue` zeigt bestätigte Werte;
 `EntityControl.vue` bedient Schalter, Zahlen, Zeiten und Auswahlfelder über
 `hass.callService`. Zahlen und Zeiten werden ausdrücklich übernommen.
 Wertebereiche, Schritte und Auswahloptionen stammen aus den aktuellen

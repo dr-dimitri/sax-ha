@@ -22,6 +22,7 @@ Die Navigation verwendet folgende Reihenfolge und Namen:
 | --- | --- | --- |
 | Allgemeine Informationen | General information | `allgemein` |
 | Stromtarif | Electricity tariff | `stromtarif` |
+| Tarifvergleich | Tariff comparison | `tarifvergleich` |
 | Netzdienliches Laden | Grid-serving charging | `netzdienliches-laden` |
 | Amortisation | Amortization | `ersparnis` |
 
@@ -167,6 +168,18 @@ werden erhalten. Preisfenster und aktive Preisbewertung kommen aus dem
 Backend. Dieselbe Tarifkarte wird in der Amortisationsansicht verwendet.
 Die Testdateien `time-of-use-charging.test.ts`, `charge-plan.test.ts` und
 `tariff-plan.test.ts` sichern Ladebedienung, Erklärung und Preisfenster ab.
+
+## Tarifvergleich
+
+`TariffComparisonView.vue`, Pfad `tarifvergleich`, Anforderung
+`REQ-VUE-TARIFF-COMPARISON`.
+
+| Bereich | Verhalten | Prüfung |
+| --- | --- | --- |
+| Angebote | Fixpreis oder Standard-Arbeitspreis mit einem oder mehreren täglichen günstigeren Zeitfenstern. Alle Angebote verwenden denselben Jahresverbrauch in kWh. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
+| Zeitfenster | Start und Ende, Brutto-Arbeitspreis in ct/kWh und Anteil des Jahresverbrauchs je Fenster. Fenster über Mitternacht sind zulässig. Keine Überschneidung, Summe der Anteile höchstens 100 %. Der restliche Verbrauch kostet den Standard-Arbeitspreis. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
+| Jahreskosten | Ausgewiesen werden Verbrauchskosten, jährliche Grundgebühr und optionaler Bonus. Die Grundgebühr lässt sich in €/Monat oder €/Jahr eingeben. Der Bonus mindert die Kosten des ersten Jahres. | [Berechnung][tariff-comparison-tests], [Browser][tariff-comparison-browser] |
+| Zustand | Eingaben bleiben beim Tabwechsel erhalten. Nach Neuladen ist der Vergleich leer. „Zurücksetzen“ entfernt die Angebote und erhält den Jahresverbrauch. Die Berechnung läuft lokal und ist unabhängig von HA-Entitäten und Geräteverbindung. | [Panel][panel-tests], [Browser][tariff-comparison-browser] |
 
 ## Netzdienliches Laden
 
@@ -349,7 +362,7 @@ und [requirements_test_2026_11.txt](../requirements_test_2026_11.txt).
 | Frontend | Im Verzeichnis `frontend`: `npm ci`, `npm run check`, `npm test`, `npm run build`; Build enthält den Test des echten ES-Moduls ohne Node-Laufzeitglobals im Browser. |
 | Chromium | `npx playwright install chromium`, dann `npm run test:browser`; [Konfiguration](../frontend/playwright.config.ts) und [Testfälle][browser-tests]. Vier Projekte: Desktop 1440×1000 und Smartphone 390×844, jeweils DE/hell und EN/dunkel. |
 | Browserdaten | `browser/server.mjs` liefert das **Produktionsbundle** unter `127.0.0.1:5190`; eine ausdrücklich als Simulation gekennzeichnete HA-Fixture liefert die Testzustände. Geprüft werden alle Tabs, Bedienung, Fokus/Tastatur, History/Reload, Fehler, Reconnect, Zeitfenster und Datumswahl. |
-| CI-Artefakte | Der Browserlauf erzeugt Screenshots aller vier Ansichten je Projekt sowie Berichte und Fehlertraces im Artefakt `vue-dashboard-browser-report`. Das Vorhandensein einer Testdefinition allein belegt noch keinen erfolgreichen Lauf. |
+| CI-Artefakte | Der Chromium-Browserlauf erzeugt Screenshots aller fünf Ansichten je Projekt sowie Berichte und Fehlertraces im Artefakt `vue-dashboard-browser-report`. Das Vorhandensein einer Testdefinition allein belegt noch keinen erfolgreichen Lauf. |
 | Reproduzierbarkeit | CI baut aus `package-lock.json` und vergleicht das komplette Verzeichnis `custom_components/sax_power/frontend` mit Git. Keine nicht eingecheckten Zusatzassets; Vue und Styles sind im lokalen Modul enthalten. |
 | Saubere Installation | [Pakettests][package-tests] installieren ein GitHub-Stable-Quellarchiv mit Wurzelpräfix sowie ein Snapshot-ZIP in getrennte temporäre Bäume und starten isolierte Python-Prozesse. |
 
@@ -554,6 +567,8 @@ ausgeblendet; die Werte sind Beispiele und keine Messungen eines realen Speicher
 [restart-tests]: ../tests/test_vue_dashboard_restart.py
 
 [electricity-tests]: ../frontend/tests/electricity-tariff.test.ts
+[tariff-comparison-tests]: ../frontend/tests/tariff-comparison.test.ts
+[tariff-comparison-browser]: ../frontend/browser/tariff-comparison.spec.ts
 [tariff-configuration-tests]: ../tests/test_dashboard_tariff_configuration.py
 [price-series-tests]: ../tests/test_dashboard_price_series.py
 [tariff-control-tests]: ../tests/test_electricity_tariff_control.py

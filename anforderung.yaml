@@ -63,6 +63,7 @@
 # REQ-VUE-SAVINGS                 done       Vue-Amortisation, Tarifplan und native Recorder-Zeitraumauswertung (#202)
 # REQ-VUE-TARIFF-EDITOR           done       Ausklappbarer Tarifeditor im Dashboard und Preise in Cent
 # REQ-VUE-ELECTRICITY-TARIFF      done       Gemeinsamer Stromtarif mit eindeutiger Auswahl, Tagespreisen und kompakter Bearbeitung
+# REQ-VUE-TARIFF-COMPARISON       done       Jahreskosten manuell eingegebener Fixpreis- und Zeitfenstertarife vergleichen
 # REQ-VUE-PARITY                  done       Funktionsmatrix, HA-Anbindung, Browser- und isolierte Paketprüfung (#203)
 # REQ-VUE-DASHBOARD-REPAIR        done       Eigenständige Vue-Aktualisierung über HA-Reparaturen (#205)
 # REQ-BINARY-SENSORS              done       binary_sensor-Plattform: Lade-/Problem-/Konnektivitätszustände mit device_class statt Klartext
@@ -3024,10 +3025,10 @@ requirement_vue_dashboard:
     Das Panel enthält die responsive,
     in Deutsch und Englisch beschriftete Navigation zu
     Allgemeine Informationen (allgemein), Stromtarif (stromtarif),
-    Netzdienliches Laden
+    Tarifvergleich (tarifvergleich), Netzdienliches Laden
     (netzdienliches-laden) und Amortisation (ersparnis), in dieser Reihenfolge.
-    Der englische Tarif-Tabname ist Electricity tariff;
-    Amortisation heißt auf Englisch Amortization.
+    Die englischen Beschriftungen für Stromtarif, Tarifvergleich und
+    Amortisation lauten Electricity tariff, Tariff comparison und Amortization.
     Der Tarifzugang bleibt unabhängig vom Zustand der Ladeautomatik sichtbar.
     Der gespeicherte Tariftyp bestimmt den Inhalt von Stromtarif, auch bei
     ausgeschalteter Netzladung. Die bisherigen Routen dynamisches-laden und
@@ -3035,11 +3036,12 @@ requirement_vue_dashboard:
     nach stromtarif umgeleitet. Beide alten Tarifansichten und ihre redundante
     Entwicklungsvorschau sind entfernt.
     Entity-Schlüssel bleiben unverändert.
-    Alle vier Ansichten zeigen die vorhandenen Entitäten und Bedienfunktionen. Die
-    gemeinsame Datenanbindung ist in REQ-VUE-ENTITY-BINDING beschrieben,
-    die Ansichten in REQ-VUE-GENERAL, REQ-VUE-CHARGING,
-    REQ-VUE-ELECTRICITY-TARIFF und REQ-VUE-SAVINGS. REQ-VUE-PARITY sichert
-    ihre HA-Anbindung und Auslieferung ab.
+    Die vier gerätebezogenen Ansichten zeigen die vorhandenen Entitäten und
+    Bedienfunktionen. Die gemeinsame Datenanbindung ist in
+    REQ-VUE-ENTITY-BINDING beschrieben, die Ansichten in REQ-VUE-GENERAL,
+    REQ-VUE-CHARGING, REQ-VUE-ELECTRICITY-TARIFF und REQ-VUE-SAVINGS.
+    REQ-VUE-TARIFF-COMPARISON beschreibt den lokalen Tarifvergleich.
+    REQ-VUE-PARITY sichert die HA-Anbindung und Auslieferung ab.
 
     Die Darstellung nutzt auf normalen Desktop-PCs den verfügbaren Platz
     mit mehrspaltigen Karten und maßvoll reduzierten Abständen. Entscheidend
@@ -3106,7 +3108,7 @@ requirement_vue_dashboard:
        Batterieintegration betriebsbereit; fremde Panels werden nicht entfernt."
     - "Alte Dashboard-Options-Werte deaktivieren das Panel nicht und erzeugen
        keine zusätzliche Geräteaktion."
-    - "Die vier Unterpfade funktionieren bei Navigation, direktem Einstieg
+    - "Die fünf Unterpfade funktionieren bei Navigation, direktem Einstieg
        und Browser-Zurück; Mount/Unmount räumt Frontend-Listener auf."
     - "Browserprüfungen belegen geringeren Desktop-Platzbedarf auch mit
        HA-Seitenleiste, vollständige Inhalte, erreichbare Bedienelemente
@@ -4110,6 +4112,48 @@ requirement_vue_electricity_tariff:
        Archiv-Restore, zulässigen Quellenwechsel und konkurrierende Optionsänderungen."
 
 # ==============================================================================
+# ANFORDERUNG: TARIFVERGLEICH
+# ==============================================================================
+requirement_vue_tariff_comparison:
+  id: REQ-VUE-TARIFF-COMPARISON
+  title: "Jahreskosten manuell eingegebener Stromtarife vergleichen"
+  status: done
+  description: >
+    Der Tab Tarifvergleich (EN: Tariff comparison) unter tarifvergleich
+    berechnet Jahreskosten aus einem gemeinsamen, manuell eingegebenen
+    Jahresverbrauch in kWh. Beliebig viele Angebote werden als Fixpreistarif
+    oder als zeitvariabler Tarif mit Standard-Arbeitspreis und einem oder
+    mehreren täglich gleichen vergünstigten Zeitfenstern eingetragen.
+    Die Eingabe verwendet Brutto-Arbeitspreise in ct/kWh, eine Grundgebühr
+    wahlweise in €/Monat oder €/Jahr und einen optionalen einmaligen Bonus in
+    Euro. Börsenpreisbasierte Tarife sind von der Auswahl ausgeschlossen.
+
+    Je Zeitfenster werden Anfang, Ende, günstigerer Arbeitspreis und Anteil
+    am Jahresverbrauch in Prozent angegeben. Zeitfenster dürfen über
+    Mitternacht laufen und unmittelbar aneinander grenzen. Das Ende ist
+    exklusiv. Zeitfenster dürfen sich nicht überschneiden und ihre Anteile
+    dürfen in Summe höchstens 100 % betragen. Der Standard-Arbeitspreis gilt
+    für den übrigen Verbrauchsanteil.
+
+    Für jedes gültige Angebot zeigt der Vergleich Verbrauchskosten,
+    jährliche Grundgebühr, Bonus sowie die Gesamtkosten im ersten Jahr und pro
+    Folgejahr. Im ersten Jahr wird der Bonus einmalig abgezogen. Die Berechnung
+    rundet die ausgewiesenen Beträge erst für die Ausgabe auf Cent. Eingaben und
+    Berechnung liegen im geöffneten Panel und bleiben beim Tabwechsel
+    verfügbar. Ein Neuladen beginnt mit einem leeren Vergleich. „Zurücksetzen“
+    entfernt alle Angebote und erhält den gemeinsamen Jahresverbrauch.
+  acceptance_criteria:
+    - "Tests prüfen einen Verbrauchswert für alle Angebote, monatliche und
+       jährliche Grundgebühr, Restanteil zum Standardpreis, genau 100 % in den
+       Zeitfenstern, Dezimalwerte und die Jahreskosten mit und ohne Bonus."
+    - "Feldfehler zeigen ungültige Zeiten, Überschneidungen, ungültige Preise
+       und Anteile an. Ungültige Eingaben bleiben korrigierbar."
+    - "Browserprüfungen prüfen beschriftete Felder, Zeitfenster über
+       Mitternacht, Hinzufügen und Entfernen, Tabwechsel, Neuladen und
+       Zurücksetzen. Der Vergleich ist unabhängig von HA-Entitäten und
+       SAX-Gerät und ruft keine Dienste auf."
+
+# ==============================================================================
 # ANFORDERUNG: VUE-ERSPARNIS UND RECORDER-AUSWERTUNG
 # ==============================================================================
 requirement_vue_savings:
@@ -4215,14 +4259,15 @@ requirement_vue_parity:
   title: "Funktionsmatrix, HA-Anbindung, Browser- und isolierte Paketprüfung (Issue #203)"
   status: done
   description: >
-    docs/vue-dashboard-parity.md ordnet alle vier Vue-Ansichten und deren
-    Entitäten, Attribute, Sichtbarkeitsregeln und Statistikfunktionen den
-    zugehörigen automatisierten Prüfungen zu. README beschreibt Aktivierung,
-    Seitenleisteneintrag, Deaktivierung, Migration und Reparatur; DEVELOPMENT
-    beschreibt Architektur, Build und Testausführung. Unterstützter
-    HA-Mindeststand ist 2026.8.2. CI führt die vollständige Python-Testsuite
-    einschließlich Einrichtung, Ladebetrieb und Dashboard-HTTP-/WebSocket-Grenzen
-    auf 2026.8.2 und 2026.11.2 mit dem jeweils zugehörigen HA-Frontend aus.
+    docs/vue-dashboard-parity.md ordnet alle fünf Vue-Ansichten und deren
+    Entitäten, Attribute, Sichtbarkeitsregeln, Statistikfunktionen und lokalen
+    Tarifvergleich den zugehörigen automatisierten Prüfungen zu. README
+    beschreibt Aktivierung, Seitenleisteneintrag, Deaktivierung, Migration
+    und Reparatur. DEVELOPMENT beschreibt Architektur, Build und Testausführung.
+    Unterstützter HA-Mindeststand ist 2026.8.2. CI führt die vollständige
+    Python-Testsuite einschließlich Einrichtung, Ladebetrieb und Dashboard-HTTP-/
+    WebSocket-Grenzen auf 2026.8.2 und 2026.11.2 mit dem jeweils zugehörigen
+    HA-Frontend aus.
 
     Komponenten- und Produktionsmodultests prüfen die reaktive Oberfläche.
     Chromium-Browsertests verwenden das tatsächlich ausgelieferte Bundle
@@ -4264,7 +4309,7 @@ requirement_vue_parity:
     - "Die Funktionsmatrix ist vollständig und referenziert vorhandene Tests
        für alle Entity-Schlüssel, Attribute, Sichtbarkeiten und Auswertungen."
     - "Browsertests prüfen 1440x1000 und 390x844 Pixel mit DE/hell und EN/dunkel
-       und erzeugen Bilder aller vier Tabs ohne zweiten Dashboard-Einstieg."
+       und erzeugen Bilder aller fünf Tabs ohne zweiten Dashboard-Einstieg."
     - "tests/test_vue_dashboard_e2e.py prüft bidirektionale HA-Änderungen
        gegen simuliertes Modbus-TCP ohne zweite Verbindung oder doppelte Aktionen."
     - "tests/test_vue_dashboard_restart.py prüft automatische Einrichtung,
@@ -4342,10 +4387,11 @@ requirement_bundled_dashboard:
     Die Implementierung und Anforderungen an das generierte Lovelace-
     Storage-Dashboard sind abgelöst. Das einzige mitgelieferte Dashboard
     ist in REQ-VUE-DASHBOARD beschrieben; seine Ansichten stehen in
-    REQ-VUE-GENERAL, REQ-VUE-CHARGING, REQ-VUE-ELECTRICITY-TARIFF und
-    REQ-VUE-SAVINGS. Lovelace-Builder, Erstellungsoption, Anlage- und
-    Neuinstallationsservices sowie Veraltet-Reparatur werden nicht mehr
-    ausgeliefert. Die Migration bereinigt zugehörige alte Integrationsdaten
+    REQ-VUE-GENERAL, REQ-VUE-CHARGING, REQ-VUE-ELECTRICITY-TARIFF,
+    REQ-VUE-TARIFF-COMPARISON und REQ-VUE-SAVINGS. Lovelace-Builder,
+    Erstellungsoption, Anlage- und Neuinstallationsservices sowie
+    Veraltet-Reparatur werden nicht mehr ausgeliefert. Die Migration bereinigt
+    zugehörige alte Integrationsdaten
     und Repair-Issues, ohne gespeicherte HA-Dashboards oder Karten zu verändern.
 
 # ==============================================================================

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   computed,
+  KeepAlive,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -14,6 +15,7 @@ import { SAX_DASHBOARD_KEY, useSaxDashboard } from "./ha";
 import GeneralView from "./views/GeneralView.vue";
 import GridServingView from "./views/GridServingView.vue";
 import ElectricityTariffView from "./views/ElectricityTariffView.vue";
+import TariffComparisonView from "./views/TariffComparisonView.vue";
 import SavingsView from "./views/SavingsView.vue";
 import type { HomeAssistant, PanelInfo, PanelRoute } from "./types";
 
@@ -47,6 +49,9 @@ const activePath = computed(() =>
   ["dynamisches-laden", "ladeautomatik"].includes(requestedPath.value)
     ? "stromtarif"
     : requestedPath.value,
+);
+const showTariffComparison = computed(
+  () => activePath.value === "tarifvergleich",
 );
 watch(
   [
@@ -174,10 +179,17 @@ function openSidebar(): void {
     </nav>
 
     <main>
-      <p v-if="dashboard.error.value" class="status" role="alert">
+      <p
+        v-if="dashboard.error.value && !showTariffComparison"
+        class="status"
+        role="alert"
+      >
         {{ dashboard.error.value }}
       </p>
-      <p v-if="activePath !== 'stromtarif'" class="introduction">
+      <p
+        v-if="activePath !== 'stromtarif' && !showTariffComparison"
+        class="introduction"
+      >
         {{ text.introduction }}
       </p>
 
@@ -190,33 +202,41 @@ function openSidebar(): void {
         <h1 id="section-heading" ref="heading" tabindex="-1">
           {{ activeTab?.[language] ?? text.notFound }}
         </h1>
-        <p v-if="!hass" class="status" role="status">{{ text.loading }}</p>
-        <p v-else-if="!panel?.config?.entry_id" class="status" role="status">
-          {{ text.missingEntry }}
-        </p>
-        <GeneralView v-else-if="activePath === 'allgemein'" />
-        <GridServingView
-          v-else-if="activePath === 'netzdienliches-laden'"
-          :hass="hass"
-        />
-        <ElectricityTariffView
-          v-else-if="activePath === 'stromtarif'"
-          :hass="hass"
-        />
-        <SavingsView
-          v-else-if="activePath === 'ersparnis'"
-          :hass="hass"
-          :entry-id="panel?.config?.entry_id"
-        />
-        <div v-else class="status">
-          <p>{{ text.notFoundDescription }}</p>
-          <a
-            :href="`${basePath}/allgemein`"
-            @click="navigate($event, `${basePath}/allgemein`)"
-          >
-            {{ text.returnToOverview }}
-          </a>
-        </div>
+        <KeepAlive>
+          <TariffComparisonView
+            v-if="showTariffComparison"
+            :language="language"
+          />
+        </KeepAlive>
+        <template v-if="!showTariffComparison">
+          <p v-if="!hass" class="status" role="status">{{ text.loading }}</p>
+          <p v-else-if="!panel?.config?.entry_id" class="status" role="status">
+            {{ text.missingEntry }}
+          </p>
+          <GeneralView v-else-if="activePath === 'allgemein'" />
+          <GridServingView
+            v-else-if="activePath === 'netzdienliches-laden'"
+            :hass="hass"
+          />
+          <ElectricityTariffView
+            v-else-if="activePath === 'stromtarif'"
+            :hass="hass"
+          />
+          <SavingsView
+            v-else-if="activePath === 'ersparnis'"
+            :hass="hass"
+            :entry-id="panel?.config?.entry_id"
+          />
+          <div v-else class="status">
+            <p>{{ text.notFoundDescription }}</p>
+            <a
+              :href="`${basePath}/allgemein`"
+              @click="navigate($event, `${basePath}/allgemein`)"
+            >
+              {{ text.returnToOverview }}
+            </a>
+          </div>
+        </template>
       </section>
     </main>
   </div>

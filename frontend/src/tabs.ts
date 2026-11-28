@@ -5,6 +5,7 @@ export const tabs = [
     en: "General information",
   },
   { path: "stromtarif", de: "Stromtarif", en: "Electricity tariff" },
+  { path: "tarifvergleich", de: "Tarifvergleich", en: "Tariff comparison" },
   {
     path: "netzdienliches-laden",
     de: "Netzdienliches Laden",

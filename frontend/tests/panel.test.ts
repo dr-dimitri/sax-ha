@@ -140,6 +140,7 @@ describe("dashboard paths", () => {
     ["", "allgemein"],
     ["/", "allgemein"],
     ["/ersparnis", "ersparnis"],
+    ["/sax-power-vue/tarifvergleich", "tarifvergleich"],
     ["/sax-power-vue/ersparnis/?period=month#chart", "ersparnis"],
     ["/sax-power-vue/unbekannt", "unbekannt"],
     ["/sax-power-vue/ersparnis/unbekannt", "ersparnis/unbekannt"],
@@ -150,7 +151,7 @@ describe("dashboard paths", () => {
 
 describe("Home Assistant panel", () => {
   it.each(["de", "en"])(
-    "opens the tariff view and general view without writes or pending feedback in %s",
+    "opens the tariff views and general view without writes or pending feedback in %s",
     async (language) => {
       const { element, callService } = await mountTariffs(
         "off",
@@ -160,7 +161,12 @@ describe("Home Assistant panel", () => {
         language,
       );
       const root = shadow(element);
-      for (const path of ["allgemein", "stromtarif", "allgemein"]) {
+      for (const path of [
+        "allgemein",
+        "stromtarif",
+        "tarifvergleich",
+        "allgemein",
+      ]) {
         root
           .querySelector<HTMLAnchorElement>(`nav a[href$='/${path}']`)!
           .click();
@@ -194,7 +200,7 @@ describe("Home Assistant panel", () => {
     "keeps one electricity tariff tab available independently of switch states (%s/%s)",
     async (timed, dynamic) => {
       const { element, callService } = await mountTariffs(timed, dynamic);
-      expect(shadow(element).querySelectorAll("nav a")).toHaveLength(4);
+      expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
       expect(
         shadow(element).querySelector('nav a[href$="/ladeautomatik"]'),
       ).toBeNull();
@@ -245,7 +251,7 @@ describe("Home Assistant panel", () => {
     );
     listeners.get("disconnected")?.();
     await flush();
-    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(4);
+    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
     expect(callService).not.toHaveBeenCalled();
   });
 
@@ -307,18 +313,18 @@ describe("Home Assistant panel", () => {
     expect(shadow(element).querySelector('[role="alert"]')?.textContent).toBe(
       "Die SAX Power Entitäten konnten nicht geladen werden.",
     );
-    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(4);
+    expect(shadow(element).querySelectorAll("nav a")).toHaveLength(5);
     element.remove();
     await flush();
     expect(connection.removeEventListener).toHaveBeenCalledTimes(3);
   });
 
-  it("mounts four stable sections and the general view with isolated styles", async () => {
+  it("mounts five stable sections and the general view with isolated styles", async () => {
     const element = await mount();
     const root = shadow(element);
 
     expect(customElements.get("sax-power-vue-panel")).toBe(SaxPowerVuePanel);
-    expect(root.querySelectorAll("nav a")).toHaveLength(4);
+    expect(root.querySelectorAll("nav a")).toHaveLength(5);
     expect(
       [...root.querySelectorAll("nav a")].map((link) =>
         link.getAttribute("href"),
@@ -326,6 +332,7 @@ describe("Home Assistant panel", () => {
     ).toEqual([
       "/sax-power-vue/allgemein",
       "/sax-power-vue/stromtarif",
+      "/sax-power-vue/tarifvergleich",
       "/sax-power-vue/netzdienliches-laden",
       "/sax-power-vue/ersparnis",
     ]);
@@ -336,6 +343,7 @@ describe("Home Assistant panel", () => {
     ).toEqual([
       "Allgemeine Informationen",
       "Stromtarif",
+      "Tarifvergleich",
       "Netzdienliches Laden",
       "Amortisation",
     ]);
@@ -365,6 +373,35 @@ describe("Home Assistant panel", () => {
     expect(selectedLink(element)?.getAttribute("href")).toBe(
       `/sax-power-vue/${path}`,
     );
+  });
+
+  it("opens tariff comparison without a SAX device and keeps its inputs across tab changes", async () => {
+    const element = await mount({ pathname: "/sax-power-vue/tarifvergleich" });
+    element.panel = { config: {}, url_path: "sax-power-vue" };
+    await flush();
+
+    const root = shadow(element);
+    const consumption = root.querySelector<HTMLInputElement>(
+      ".tariff-comparison-view input",
+    )!;
+    consumption.value = "3500";
+    consumption.dispatchEvent(new Event("input", { bubbles: true }));
+
+    root.querySelector<HTMLAnchorElement>('nav a[href$="/allgemein"]')!.click();
+    await flush();
+    expect(root.querySelector(".tariff-comparison-view")).toBeNull();
+    expect(root.querySelector('[role="status"]')?.textContent).toContain(
+      "kein SAX-Power-Gerät",
+    );
+
+    root
+      .querySelector<HTMLAnchorElement>('nav a[href$="/tarifvergleich"]')!
+      .click();
+    await flush();
+    expect(root.querySelector(".tariff-comparison-view input")).toBe(
+      consumption,
+    );
+    expect(consumption.value).toBe("3500");
   });
 
   it("localizes the dashboard description and preserves the open view", async () => {
@@ -425,6 +462,7 @@ describe("Home Assistant panel", () => {
     ).toEqual([
       "General information",
       "Electricity tariff",
+      "Tariff comparison",
       "Grid-serving charging",
       "Amortization",
     ]);

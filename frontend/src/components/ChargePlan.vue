@@ -14,6 +14,13 @@ const dashboard = inject(SAX_DASHBOARD_KEY);
 const id = useId();
 const german = computed(() => dashboard?.language.value === "de");
 const plan = computed(() => dashboard?.entity("sensor", "bridge_charge_plan"));
+const allLowTariffs = computed(() => {
+  const tariff = dashboard?.tariff.value;
+  return (
+    tariff?.tariff_type === "time_of_use" &&
+    tariff.all_low_tariffs_enabled === true
+  );
+});
 const control = computed(() =>
   dashboard?.entity("switch", "bridge_charge_enabled"),
 );
@@ -60,6 +67,8 @@ const text = computed(() =>
   german.value
     ? {
         title: "Ladeplanung",
+        allLowTariffs:
+          "Ladestart in jedem Zeitfenster unter dem Standardpreis, sofern Netzladeziel und Schutzgrenzen es zulassen.",
         noCharge: "Keine Ladung nötig",
         chargeNeeded: "Ladung voraussichtlich nötig",
         charging: "Ladung läuft",
@@ -84,6 +93,8 @@ const text = computed(() =>
       }
     : {
         title: "Charging plan",
+        allLowTariffs:
+          "Charging starts in every window below the standard price, subject to the grid charge target and protection limits.",
         noCharge: "No charging needed",
         chargeNeeded: "Charging likely needed",
         charging: "Charging in progress",
@@ -644,7 +655,26 @@ const orderDetails = computed(() => {
 
 <template>
   <section
-    v-if="
+    v-if="allLowTariffs && automatic"
+    class="charge-plan"
+    :aria-labelledby="`${id}-charge-plan`"
+  >
+    <h2 :id="`${id}-charge-plan`">
+      {{ chargingActive ? `${text.title}: ` : text.title
+      }}<span
+        v-if="chargingActive"
+        class="charge-plan__demand charge-plan__demand--charging"
+        aria-live="polite"
+        >{{ text.charging }}</span
+      >
+    </h2>
+    <p class="charge-plan__description">
+      {{ chargingActive ? chargingDescription : text.allLowTariffs }}
+    </p>
+  </section>
+  <section
+    v-else-if="
+      !allLowTariffs &&
       (plan || control || currentForecast || fixedTimeStart) &&
       (demandLabel || description || configurationHint)
     "

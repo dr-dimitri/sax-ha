@@ -159,8 +159,11 @@ Beim Kopieren eines Zeitfensters werden Arbeitspreis und Verbrauchsanteil
 du, wie sich die Gesamtkosten im ersten Jahr und in den Folgejahren bei
 unterschiedlichem Verbrauch entwickeln. **Als PDF exportieren** öffnet den
 Druckdialog mit Tarifdetails, Jahreskosten und beiden Kostenkurven. Wähle
-dort **Als PDF speichern**. **Zurücksetzen** entfernt alle Angebote. Beim
-Neuladen der Seite beginnt der Vergleich leer.
+dort **Als PDF speichern**. Home Assistant speichert den Jahresverbrauch und
+bis zu vier Angebote automatisch für dein Benutzerkonto. Mit demselben Konto
+kannst du den Vergleich auch in einem anderen Browser öffnen. Mit
+**Zurücksetzen** löschst du die gespeicherten Angebote und kannst mit
+dem eingegebenen Jahresverbrauch einen neuen Vergleich beginnen.
 
 Nach einem Dashboard-Update kann unter **Einstellungen → System →
 Reparaturen** ein Hinweis erscheinen. Folge den Schritten und lade danach
@@ -253,6 +256,16 @@ die bestehende Zellkalibrierung kann die Grenzen vorübergehend auf 100 % anhebe
 Nach Erreichen des Ziels wird erst am nächsten täglichen Start wieder geladen.
 Ein Neustart erhält den Tagesabschluss und setzt eine noch laufende Ladung fort.
 Die Startzeit verwendet die in Home Assistant eingestellte Zeitzone.
+
+### Netzladung in allen Niedrigtarifen
+
+Bei einem aktiven zeitvariablen Tarif kannst du unter **Stromtarif → Netzladung
+→ Bearbeiten** die Ladeweise **In allen Niedrigtarifen** wählen. Mit
+eingeschalteter automatischer Netzladung startet der Speicher am Beginn
+eines Fensters, dessen Arbeitspreis unter dem Standardpreis liegt, sofern
+der SOC unter dem Netzladeziel liegt. Preisfenster mit unterschiedlichen
+Rabatten qualifizieren sich unabhängig voneinander. Netzlademonate, die
+globale Max-SOC-Grenze und die Priorität für PV-Überschuss gelten weiterhin.
 
 ### Zeitgesteuerte Netzladung
 

@@ -98,6 +98,9 @@ const text = computed(() =>
         invalidPvFactor:
           "Bitte einen ganzen PV-Anteil von 0 bis 100 % eingeben.",
         charging: "Netzladung",
+        allLowTariffs: "In allen Niedrigtarifen",
+        timeOfUseRequired:
+          "Diese Ladeweise ist bei einem zeitvariablen Tarif verfügbar.",
         pvSummary: "PV-Ertragsprognose",
         pvWaiting: "Warte auf Ertragswert …",
         pvReadError: "Ertragswert derzeit nicht abrufbar",
@@ -200,6 +203,9 @@ const text = computed(() =>
           "Enter an attribute name with at most 128 characters or leave the field blank for automatic detection.",
         invalidPvFactor: "Enter a whole PV percentage from 0 to 100%.",
         charging: "Grid charging",
+        allLowTariffs: "In all low-tariff windows",
+        timeOfUseRequired:
+          "This charging method is available with a time-of-use tariff.",
         pvSummary: "Solar yield forecast",
         pvWaiting: "Waiting for yield data …",
         pvReadError: "Yield data currently unavailable",
@@ -251,6 +257,11 @@ const profile = computed(() => dashboard?.tariff.value ?? lastProfile.value);
 const active = computed(() => profile.value?.tariff_type);
 const fixedTimeEnabled = computed(
   () => profile.value?.fixed_time_charging?.enabled === true,
+);
+const allLowTariffsEnabled = computed(
+  () =>
+    active.value === "time_of_use" &&
+    profile.value?.all_low_tariffs_enabled === true,
 );
 const known = computed(
   () => active.value === "time_of_use" || active.value === "dynamic",
@@ -385,6 +396,7 @@ const months = Array.from(
 const chargingFeedback = computed(() => {
   const bridgeSelected =
     !fixedTimeEnabled.value &&
+    !allLowTariffsEnabled.value &&
     dashboard?.entity("switch", "bridge_charge_enabled")?.state?.state === "on";
   const fields: (readonly ["number" | "switch", string])[] =
     active.value === "dynamic"
@@ -1359,6 +1371,13 @@ async function applyCharging(): Promise<void> {
         </section>
       </section>
     </div>
+    <section v-else-if="profile" class="electricity-card">
+      <header>
+        <h2>{{ text.charging }}</h2>
+        <button type="button" disabled>{{ text.allLowTariffs }}</button>
+      </header>
+      <p>{{ text.timeOfUseRequired }}</p>
+    </section>
     <p v-if="known" class="electricity-footnote">{{ text.gross }}</p>
   </div>
 </template>

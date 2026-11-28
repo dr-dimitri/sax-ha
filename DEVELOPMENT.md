@@ -179,8 +179,11 @@ und ohne zusätzlichen History-Eintrag nach `stromtarif` weitergeleitet.
 Die früheren separaten Tarifansichten und ihre Entwicklungsvorschau sind entfernt.
 Entity-Schlüssel und bestehende Steuerparameter bleiben erhalten.
 
-`TariffComparisonView.vue` verwaltet den Vergleich im Zustand des geöffneten
-Panels. Vue hält die Ansicht beim Tabwechsel im Speicher. Die
+`TariffComparisonView.vue` verwaltet bis zu vier Angebote und den gemeinsamen
+Jahresverbrauch. `dashboard_tariff_comparison.py` speichert die Entwürfe über
+Home Assistants `Store` pro Config Entry und Benutzerkonto. Das Dashboard fasst
+Eingaben zusammen und sendet sie mit der Revision des zuletzt geladenen
+Standes. Schlägt das Speichern fehl, bleibt der Entwurf verfügbar. Die
 Berechnungslogik in `frontend/src/tariff-comparison.ts` gewichtet die
 Arbeitspreise der täglichen Zeitfenster nach den eingegebenen Anteilen am
 gemeinsamen Jahresverbrauch und berechnet den übrigen Verbrauch zum
@@ -191,8 +194,7 @@ jährliche Grundgebühr wie die Vergleichstabelle. Der Bonus verschiebt die Kurv
 für das erste Jahr. `TariffComparisonPrintReport.vue` verwendet dieselben
 Kurven und Berechnungen für beide Tarifjahre. Der Report wird mit separatem
 Druck-CSS in ein lokales Druckfenster übernommen.
-Die Ansicht bezieht alle Eingaben aus dem Formular und
-benötigt keine HA-Entitäten. Berechnungstests und Browserabdeckung sind in der
+Die Formularberechnung läuft ohne HA-Entitäten. Berechnungstests und Browserabdeckung sind in der
 [Funktionsmatrix](docs/vue-dashboard-parity.md#tarifvergleich) verlinkt.
 
 `ChargingLayout.vue` stellt die Karten für netzdienliches Laden dar und filtert
@@ -312,6 +314,10 @@ zusammen über den Tarif-WebSocket-Endpunkt angenommen;
 `charging_method` wechselt atomar zu einer bisherigen Ladeweise
 zurück. `fixed_time_charge_enabled` und `fixed_time_charge_start` sind gemeinsame
 Config-Entry-Optionen, unabhängig von den gespeicherten Preisprofilen.
+`charging_method: all_low_tariffs` speichert die Auswahl im zeitvariablen
+Profil. Die Laufzeit bindet die Freigabe an den zusammenhängenden Preisabschnitt
+unter dem Standardpreis und verwendet den gemeinsamen Sollwertschreiber, das
+Netzladeziel und die bestehenden Grenzen für SOC, Netzlademonate und PV.
 Bei fester Startzeit bleibt bei beiden Tarifarten `ChargePlan.vue` sichtbar.
 Die Überschrift ergänzt **Feste Startzeit HH:MM Uhr** in Blau aus der
 bestätigten Tarifkonfiguration; gespeicherte Sekunden ungleich null bleiben

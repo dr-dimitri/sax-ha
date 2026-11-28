@@ -1,5 +1,6 @@
 """REQ-TIMED-SOC-CHARGE: persist only complete, validated window identities."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from datetime import time as dt_time
 from unittest.mock import AsyncMock
@@ -146,6 +147,27 @@ async def test_tariff_source_survives_round_trip_including_full_day_windows(
     restored = await TimedChargeStateStore(hass, "tariff").async_load()
     assert restored == TimedChargeState(start, end, expiry.astimezone(UTC), source)
     assert (await store._store.async_load())["source"] == source
+
+
+async def test_completed_tariff_target_survives_round_trip(
+    hass: HomeAssistant,
+) -> None:
+    state = TimedChargeState(
+        dt_time(22),
+        dt_time(6),
+        datetime(2026, 10, 25, 6, tzinfo=UTC),
+        "a" * 64,
+        completed_target_soc=62,
+    )
+    store = TimedChargeStateStore(hass, "completed")
+
+    await store.async_save(state)
+    assert await store.async_load() == state
+
+    with pytest.raises(ValueError, match="abgeschlossenes Netzladeziel"):
+        await store.async_save(replace(state, source=None))
+    with pytest.raises(ValueError, match="abgeschlossenes Netzladeziel"):
+        await store.async_save(replace(state, completed_target_soc=True))
 
 
 @pytest.mark.parametrize("explicit_null", [False, True])

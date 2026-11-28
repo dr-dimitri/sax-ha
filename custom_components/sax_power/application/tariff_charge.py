@@ -12,12 +12,16 @@ from .timed_charge import TimedChargeState
 
 
 def tariff_charge_state(
-    config: TariffConfig, now: datetime, active_months: Set[int]
+    config: TariffConfig,
+    now: datetime,
+    active_months: Set[int],
+    *,
+    below_base_price: bool = False,
 ) -> TimedChargeState | None:
     """Bind a latch to the tariff and the actual occurrence, never legacy times."""
     if now.month not in active_months:
         return None
-    quote = low_tariff_window(config, now)
+    quote = low_tariff_window(config, now, below_base_price=below_base_price)
     if quote is None or quote.valid_from is None or quote.valid_until is None:
         return None
     start = quote.valid_from.astimezone(UTC)
@@ -40,7 +44,14 @@ def tariff_charge_state(
         boundary += timedelta(days=1)
     # Persist the exact tariff occurrence so a former manual window, tariff
     # edit, or repeated DST hour cannot restore unrelated permission.
-    source = hashlib.sha256(repr((config, start, end)).encode()).hexdigest()
+    # Keep existing persisted identities compatible while separating the
+    # all-low mode even when both methods select the same occurrence.
+    identity = (
+        (config, start, end, "all_low_tariffs")
+        if below_base_price
+        else (config, start, end)
+    )
+    source = hashlib.sha256(repr(identity).encode()).hexdigest()
     return TimedChargeState(
         start.astimezone(now.tzinfo).time(),
         end.astimezone(now.tzinfo).time(),

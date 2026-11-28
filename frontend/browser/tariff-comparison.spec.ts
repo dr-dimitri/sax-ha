@@ -6,6 +6,7 @@ const labels = {
     electricityTariff: "Stromtarif",
     consumption: "Jahresverbrauch (kWh)",
     addTariff: "Tarif hinzufügen",
+    removeTariff: "Tarif entfernen",
     name: "Tarifname",
     type: "Tarifart",
     timeOfUse: "Zeitvariabel",
@@ -22,7 +23,7 @@ const labels = {
     windowTable: "Zeitfenster",
     start: "Beginn",
     end: "Ende",
-    share: "Verbrauchsanteil (%)",
+    share: "Anteil (%)",
     results: "Jahreskosten im Vergleich",
     standardConsumption: "Verbrauch zum Standardpreis",
     firstYear: "Kosten im ersten Jahr",
@@ -37,6 +38,13 @@ const labels = {
     incompleteReport: "Unvollständige Tarife im Formular: 1",
     popupBlocked: "Erlaube Pop-ups für Home Assistant und versuche es erneut.",
     reset: "Zurücksetzen",
+    saving: "Änderungen werden gespeichert …",
+    saved: "Auf Home Assistant gespeichert.",
+    saveError: "Der Tarifvergleich konnte nicht gespeichert werden.",
+    retry: "Erneut versuchen",
+    offline: "Offline. Dein Entwurf bleibt geöffnet.",
+    keepDraft: "Eigenen Entwurf speichern",
+    loadStored: "Gespeicherte Tarife laden",
     totalShareTooHigh:
       "Die Verbrauchsanteile aller Zeitfenster dürfen zusammen höchstens 100 % betragen.",
   },
@@ -45,6 +53,7 @@ const labels = {
     electricityTariff: "Electricity tariff",
     consumption: "Annual consumption (kWh)",
     addTariff: "Add tariff",
+    removeTariff: "Remove tariff",
     name: "Tariff name",
     type: "Tariff type",
     timeOfUse: "Time of use",
@@ -61,7 +70,7 @@ const labels = {
     windowTable: "Time windows",
     start: "Start",
     end: "End",
-    share: "Share of consumption (%)",
+    share: "Share (%)",
     results: "Annual cost comparison",
     standardConsumption: "Consumption at standard price",
     firstYear: "First-year cost",
@@ -76,6 +85,13 @@ const labels = {
     incompleteReport: "Incomplete tariffs in the form: 1",
     popupBlocked: "Allow pop-ups for Home Assistant and try again.",
     reset: "Reset",
+    saving: "Saving changes …",
+    saved: "Saved to Home Assistant.",
+    saveError: "The tariff comparison could not be saved.",
+    retry: "Try again",
+    offline: "Offline. Your draft stays open.",
+    keepDraft: "Save my draft",
+    loadStored: "Load saved tariffs",
     totalShareTooHigh:
       "The shares of all time windows together must be at most 100%.",
   },
@@ -152,7 +168,7 @@ test.beforeEach(async ({ page }, testInfo) => {
     await page.locator("#theme").click();
 });
 
-// REQ-VUE-TARIFF-COMPARISON: exercise the bundled calculator with no HA writes.
+// REQ-VUE-TARIFF-COMPARISON: storage stays independent of device control.
 test("table and chart compare first and later years for fixed and time-of-use tariffs", async ({
   page,
 }, testInfo) => {
@@ -342,7 +358,7 @@ test("PDF export prints tariff details and both annual cost charts with chart vi
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
 });
 
-test("incomplete and conflicting window inputs keep their drafts and resetting clears the tariffs", async ({
+test("window drafts survive navigation and reload until resetting clears the tariffs", async ({
   page,
 }, testInfo) => {
   const english = testInfo.project.name.endsWith("en");
@@ -409,20 +425,160 @@ test("incomplete and conflicting window inputs keep their drafts and resetting c
   await expect(secondShare).toHaveValue("40");
 
   await addTariff(panel, copy, "Weiteres Angebot");
-  await panel.getByRole("button", { name: copy.reset, exact: true }).click();
-  await expect(panel.getByLabel(copy.name, { exact: true })).toHaveCount(0);
-  await expect(panel.getByRole("table", { name: copy.results })).toHaveCount(0);
-  await expect(consumption).toHaveValue("4200");
-  await addTariff(panel, copy, "Nur für diese Sitzung");
+  await secondEnd.fill("08:");
+  await expect(panel.getByText(copy.saved, { exact: true })).toBeVisible();
   await page.reload();
   await expect(panel.getByRole("heading", { level: 1 })).toHaveText(
     labels.de.tab,
   );
+  const restoredTariff = panel.getByRole("article", { name: "Wochenangebot" });
+  const restoredWindow = restoredTariff.getByRole("group", {
+    name: "Zeitfenster 2",
+  });
+  await expect(
+    restoredWindow.getByLabel(labels.de.end, { exact: true }),
+  ).toHaveValue("08:");
+  await expect(
+    restoredWindow.getByLabel(labels.de.share, { exact: true }),
+  ).toHaveValue("40");
+  await expect(
+    panel.getByRole("article", { name: "Weiteres Angebot" }),
+  ).toBeVisible();
+  await expect(panel.getByLabel(labels.de.consumption)).toHaveValue("4200");
+
+  await panel
+    .getByRole("button", { name: labels.de.reset, exact: true })
+    .click();
   await expect(panel.getByLabel(labels.de.name, { exact: true })).toHaveCount(
     0,
   );
-  await expect(panel.getByLabel(labels.de.consumption)).toHaveValue("");
+  await expect(
+    panel.getByRole("table", { name: labels.de.results }),
+  ).toHaveCount(0);
+  await expect(panel.getByText(labels.de.saved, { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(panel.getByLabel(labels.de.name, { exact: true })).toHaveCount(
+    0,
+  );
+  await expect(panel.getByLabel(labels.de.consumption)).toHaveValue("4200");
   await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("the tariff limit stays at four after reload and frees a slot on removal", async ({
+  page,
+}, testInfo) => {
+  const copy = labels[testInfo.project.name.endsWith("en") ? "en" : "de"];
+  const panel = page.locator("sax-power-vue-panel");
+  for (let index = 1; index <= 4; index++)
+    await addTariff(panel, copy, `Angebot ${index}`);
+  await expect(
+    panel.getByRole("button", { name: copy.addTariff }),
+  ).toBeDisabled();
+  await expect(panel.getByText(copy.saved, { exact: true })).toBeVisible();
+
+  await page.reload();
+  const restored = panel.getByLabel(labels.de.name, { exact: true });
+  await expect(restored).toHaveCount(4);
+  const addButton = panel.getByRole("button", { name: labels.de.addTariff });
+  await expect(addButton).toBeDisabled();
+  await panel
+    .getByRole("article", { name: "Angebot 2", exact: true })
+    .getByRole("button", { name: labels.de.removeTariff })
+    .click();
+  await expect(addButton).toBeEnabled();
+  await addTariff(panel, labels.de, "Neues Angebot");
+  await expect(restored).toHaveCount(4);
+  await expect(addButton).toBeDisabled();
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("device storage acknowledges only the latest draft after a delayed write, retry and reconnect", async ({
+  page,
+}, testInfo) => {
+  const copy = labels[testInfo.project.name.endsWith("en") ? "en" : "de"];
+  const panel = page.locator("sax-power-vue-panel");
+  const consumption = panel.getByLabel(copy.consumption);
+  const hold = page.locator("#hold-action");
+  const release = page.locator("#release-action");
+  await hold.click();
+  await consumption.fill("1000");
+  await expect(panel.getByText(copy.saving, { exact: true })).toBeVisible();
+  await expect(release).toBeEnabled();
+  await expect(panel).toHaveAttribute("data-tariff-comparison-saves", "1");
+  await consumption.fill("2000");
+  await addTariff(panel, copy, "Gespeicherter Entwurf");
+
+  await page.locator("#failure").click();
+  await release.click();
+  await expect(panel.getByRole("alert")).toHaveText(copy.saveError);
+  await expect(consumption).toHaveValue("2000");
+  await expect(panel).toHaveAttribute("data-tariff-comparison-saves", "1");
+  await panel.getByRole("button", { name: copy.retry }).click();
+  await expect(panel.getByText(copy.saved, { exact: true })).toBeVisible();
+  await expect(panel).toHaveAttribute("data-tariff-comparison-saves", "2");
+
+  await hold.click();
+  await consumption.fill("2200");
+  await expect(release).toBeEnabled();
+  await consumption.fill("2500");
+  await release.click();
+  await expect(panel.getByText(copy.saved, { exact: true })).toBeVisible();
+  await expect(panel).toHaveAttribute("data-tariff-comparison-saves", "4");
+
+  await page.locator("#connection").click();
+  await consumption.fill("3000");
+  await expect(panel.getByText(copy.offline, { exact: true })).toBeVisible();
+  await expect(panel).toHaveAttribute("data-tariff-comparison-saves", "4");
+  await page.locator("#connection").click();
+  await expect(panel.getByText(copy.saved, { exact: true })).toBeVisible();
+  await expect(panel).toHaveAttribute("data-tariff-comparison-saves", "5");
+  await page.reload();
+  await expect(panel.getByLabel(labels.de.consumption)).toHaveValue("3000");
+  await expect(
+    panel.getByRole("article", { name: "Gespeicherter Entwurf" }),
+  ).toBeVisible();
+  await expect(page.locator("#actions")).toHaveText("Keine Aktion");
+});
+
+test("a storage conflict lets the user keep the draft or load the newer tariffs", async ({
+  page,
+}, testInfo) => {
+  const copy = labels[testInfo.project.name.endsWith("en") ? "en" : "de"];
+  const panel = page.locator("sax-power-vue-panel");
+  const consumption = panel.getByLabel(copy.consumption);
+  await consumption.fill("1000");
+  await expect(panel.getByText(copy.saved, { exact: true })).toBeVisible();
+
+  async function storeExternal(value: string): Promise<void> {
+    await page.evaluate((annualConsumption) => {
+      const key = "sax-demo-tariff-comparison:demo-entry";
+      const stored = JSON.parse(sessionStorage.getItem(key) ?? "{}");
+      sessionStorage.setItem(
+        key,
+        JSON.stringify({
+          ...stored,
+          revision: String(Number(stored.revision) + 1),
+          annual_consumption: annualConsumption,
+        }),
+      );
+    }, value);
+  }
+
+  await storeExternal("4000");
+  await consumption.fill("2000");
+  const keepDraft = panel.getByRole("button", { name: copy.keepDraft });
+  await expect(keepDraft).toBeVisible();
+  await expect(consumption).toHaveValue("2000");
+  await keepDraft.click();
+  await expect(panel.getByText(copy.saved, { exact: true })).toBeVisible();
+  await expect(consumption).toHaveValue("2000");
+
+  await storeExternal("5000");
+  await consumption.fill("3000");
+  await panel.getByRole("button", { name: copy.loadStored }).click();
+  await expect(consumption).toHaveValue("5000");
+  await expect(panel.getByRole("alert")).toHaveCount(0);
+  await expect(panel).toHaveAttribute("data-tariff-comparison-saves", "4");
 });
 
 test("copying a peak-price window clears its times and keeps its price and consumption share", async ({
@@ -447,6 +603,20 @@ test("copying a peak-price window clears its times and keeps its price and consu
     window(number).getByLabel(copy.start, { exact: true });
   const end = (number: number) =>
     window(number).getByLabel(copy.end, { exact: true });
+  const layout = await window(1).evaluate((element) => ({
+    columns: getComputedStyle(
+      element.querySelector(".window-fields")!,
+    ).gridTemplateColumns.split(" ").length,
+    smallestControl: Math.min(
+      ...[...element.querySelectorAll("input, button")].map(
+        (control) => control.getBoundingClientRect().height,
+      ),
+    ),
+  }));
+  expect(layout.columns).toBe(
+    testInfo.project.name.startsWith("mobile") ? 2 : 4,
+  );
+  expect(layout.smallestControl).toBeGreaterThanOrEqual(44);
   await enterTime(start(1), "7", "07:00");
   await enterTime(end(1), "9", "09:00");
   await window(1).getByLabel(copy.price).fill("45");

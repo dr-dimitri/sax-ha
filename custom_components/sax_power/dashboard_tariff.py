@@ -24,6 +24,7 @@ from .application.tariff_profiles import (
     tariff_profiles_from_options,
 )
 from .const import (
+    CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED,
     CONF_BRIDGE_CHARGE_ENABLED,
     CONF_DASHBOARD_TARIFF_PROFILES,
     CONF_ECONOMICS_FEED_IN_PRICE,
@@ -94,6 +95,7 @@ class _Tariff(TypedDict):
     automation_enabled: bool | None
     profiles: dict[str, dict[str, Any]]
     fixed_time_charging: dict[str, bool | str | None]
+    all_low_tariffs_enabled: bool
 
 
 @callback
@@ -149,6 +151,9 @@ def _result(
             and bool(fixed_start_valid),
             "start": fixed_start if fixed_start_valid else None,
         },
+        "all_low_tariffs_enabled": config.tariff_type is TariffType.TIME_OF_USE
+        and entry.options.get(CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED) is True
+        and entry.options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is not True,
         "tariff_type": config.tariff_type.value,
         "base_price_ct_kwh": _cent(config.tou_base_price_eur_kwh),
         "feed_in_price_ct_kwh": _cent(config.feed_in_price_eur_kwh),
@@ -411,6 +416,8 @@ def _configuration_profile(
         profile[CONF_BRIDGE_CHARGE_ENABLED] = previous.get(
             CONF_BRIDGE_CHARGE_ENABLED, False
         )
+        if previous.get(CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED) is True:
+            profile[CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED] = True
         return profile
     if set(submitted) != {
         "feed_in_price_ct_kwh",
@@ -502,7 +509,15 @@ def _fixed_time_configuration(submitted: Any) -> dict[str, Any]:
         vol.Optional("fixed_time_charging"): object,
         vol.Optional("charging_settings"): object,
         vol.Optional("charging_method"): vol.In(
-            ["fixed", "bridge", "smart", "relative", "absolute", "off"]
+            [
+                "fixed",
+                "bridge",
+                "all_low_tariffs",
+                "smart",
+                "relative",
+                "absolute",
+                "off",
+            ]
         ),
     }
 )
@@ -534,12 +549,21 @@ async def websocket_configure_tariff(
         )
         if method is not None:
             allowed_methods = (
-                {"fixed", "bridge"}
+                {"fixed", "bridge", "all_low_tariffs"}
                 if msg["tariff_type"] == TariffType.TIME_OF_USE
                 else {"smart", "relative", "absolute", "off"}
             )
-            if method not in allowed_methods or (
-                fixed_time is not None and fixed_time[CONF_FIXED_TIME_CHARGE_ENABLED]
+            if (
+                method not in allowed_methods
+                or (
+                    fixed_time is not None
+                    and fixed_time[CONF_FIXED_TIME_CHARGE_ENABLED]
+                )
+                or (
+                    method == "all_low_tariffs"
+                    and expected_options.get(CONF_ECONOMICS_TARIFF_TYPE)
+                    != TariffType.TIME_OF_USE
+                )
             ):
                 raise ValueError("Select one charging method for the active tariff")
         profile = (
@@ -561,23 +585,38 @@ async def websocket_configure_tariff(
             options.update(fixed_time)
             if fixed_time[CONF_FIXED_TIME_CHARGE_ENABLED]:
                 options[CONF_BRIDGE_CHARGE_ENABLED] = False
+                options.pop(CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED, None)
         if method is not None:
             options[CONF_FIXED_TIME_CHARGE_ENABLED] = False
             if msg["tariff_type"] == TariffType.TIME_OF_USE:
                 options[CONF_BRIDGE_CHARGE_ENABLED] = method == "bridge"
+                if method == "all_low_tariffs":
+                    options[CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED] = True
+                else:
+                    options.pop(CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED, None)
             else:
                 price_strategy = method
         if "charging_settings" in msg and (
-            options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is not True
+            not (
+                options.get(CONF_FIXED_TIME_CHARGE_ENABLED) is True
+                or options.get(CONF_ALL_LOW_TARIFFS_CHARGE_ENABLED) is True
+            )
             or not isinstance(charging_settings, dict)
             or not charging_settings
             or not set(charging_settings) <= {"max_soc", "timed_charge_max_soc"}
         ):
-            raise ValueError("Submit grid charge limits with the fixed-time method")
+            raise ValueError(
+                "Submit grid charge limits with a compatible charging method"
+            )
         if error := bridge_configuration_error(options):
             connection.send_error(msg["id"], error, "Keep the required PV start source")
             return
-        if enabled is True or enabled is None and _automation_enabled(hass, entry):
+        if (
+            method == "all_low_tariffs"
+            or enabled is True
+            or enabled is None
+            and _automation_enabled(hass, entry)
+        ):
             if validate_tariff(tariff_config_from_options(options)) is not None:
                 raise ValueError("Configure the tariff before enabling charging")
             if msg["tariff_type"] == TariffType.DYNAMIC and not options.get(

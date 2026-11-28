@@ -290,22 +290,35 @@ def lowest_daily_price(config: TariffConfig | None) -> float | None:
 
 
 def low_tariff_window(
-    config: TariffConfig | None, moment: datetime
+    config: TariffConfig | None, moment: datetime, *, below_base_price: bool = False
 ) -> PriceQuote | None:
     """Die zusammenhängende aktuelle Niedertarifphase mit echten Zeitgrenzen.
 
-    Gleich billige Fenster und Basispreis-Lücken gehören zur selben Phase,
-    auch über Mitternacht hinweg. Nur ein ganztägig konstanter Tarif erhält
-    lokale Tagesgrenzen; Monatsfreigaben wendet die Ladepolicy darauf an.
+    Gleich billige Fenster und Basispreis-Lücken gehören zur selben Phase.
+    Bei Laden in allen Niedrigtarifen können auch unterschiedliche Preise
+    unterhalb des Standardpreises zur selben Phase gehören. Ganztägige
+    Ladefreigaben erhalten lokale Tagesgrenzen. Monatsfreigaben wendet die
+    Ladepolicy darauf an.
     Siehe REQ-TIME-OF-USE-CHARGE-SOURCE.
     """
-    cheapest = lowest_daily_price(config)
-    if cheapest is None:
+    if config is None or config.tariff_type is not TariffType.TIME_OF_USE:
         return None
-    assert config is not None
+    threshold = (
+        config.tou_base_price_eur_kwh
+        if below_base_price
+        else lowest_daily_price(config)
+    )
+    if threshold is None:
+        return None
+
+    def price_is_low(price: float | None) -> bool:
+        if below_base_price:
+            return price is not None and price < threshold
+        return price == threshold
+
     try:
         quote = evaluate_static_tariff(config, moment).quote
-        if quote is None or quote.price_eur_kwh != cheapest:
+        if quote is None or not price_is_low(quote.price_eur_kwh):
             return None
 
         def is_low(instant: datetime) -> bool:
@@ -315,7 +328,7 @@ def low_tariff_window(
                 if window is None
                 else window.price_eur_kwh
             )
-            return price == cheapest
+            return price_is_low(price)
 
         changes = sorted(
             instant
@@ -326,7 +339,7 @@ def low_tariff_window(
             start, end = _bounds_around(moment, changes)
         else:
             start, end = _day_bounds(moment)
-        return PriceQuote(cheapest, quote.source, start, end)
+        return PriceQuote(quote.price_eur_kwh, quote.source, start, end)
     except OverflowError, ValueError:
         return None
 

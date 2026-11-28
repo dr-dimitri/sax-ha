@@ -28,6 +28,9 @@ async function mount(
   type: "time_of_use" | "dynamic",
   options: {
     active?: boolean;
+    allLowTariffs?: boolean;
+    basePrice?: number | null;
+    feedInPrice?: number | null;
     readonly?: boolean;
     language?: string;
     threshold?: string;
@@ -56,13 +59,15 @@ async function mount(
     });
   let stored: TariffProfile = {
     tariff_type: type,
-    base_price_ct_kwh: 32,
-    feed_in_price_ct_kwh: 8,
+    base_price_ct_kwh: options.basePrice === undefined ? 32 : options.basePrice,
+    feed_in_price_ct_kwh:
+      options.feedInPrice === undefined ? 8 : options.feedInPrice,
     windows: [],
     revision: "1",
     can_edit: true,
     can_configure: !options.readonly,
     automation_enabled: false,
+    all_low_tariffs_enabled: !!options.allLowTariffs,
     fixed_time_charging: {
       enabled: !!options.active,
       start: options.active ? "02:00:00" : null,
@@ -73,6 +78,7 @@ async function mount(
       stored = {
         ...stored,
         revision: String(Number(stored.revision) + 1),
+        all_low_tariffs_enabled: request.charging_method === "all_low_tariffs",
         fixed_time_charging: request.fixed_time_charging
           ? {
               ...(request.fixed_time_charging as {
@@ -147,6 +153,11 @@ function fixed(root: Element) {
     '[data-method="fixed_time"], [data-strategy="fixed_time"]',
   )!;
 }
+function allLowTariffs(root: Element) {
+  return root.querySelector<HTMLButtonElement>(
+    '[data-method="all_low_tariffs"], [data-strategy="all_low_tariffs"]',
+  )!;
+}
 function input(root: Element) {
   return root.querySelector<HTMLInputElement>(
     ".fixed-time-charging-input input",
@@ -160,6 +171,61 @@ async function fill(root: Element, value: string) {
 afterEach(() => {
   apps.splice(0).forEach((app) => app.unmount());
   document.body.replaceChildren();
+});
+describe("all low-tariff windows", () => {
+  it("cancels all-low mode and keeps the confirmed fixed start", async () => {
+    const fixture = await mount("time_of_use", { active: true });
+    allLowTariffs(fixture.root).click();
+    await flush();
+    expect(allLowTariffs(fixture.root).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(input(fixture.root)).toBeNull();
+    expect(fixture.reset()).toBe(true);
+    await flush();
+    expect(fixed(fixture.root).getAttribute("aria-pressed")).toBe("true");
+    expect(input(fixture.root).value).toBe("02:00");
+    expect(fixture.callWS).not.toHaveBeenCalled();
+  });
+  it("leaves the all-low mode and selects fixed charging in one request", async () => {
+    const fixture = await mount("time_of_use", { allLowTariffs: true });
+    expect(allLowTariffs(fixture.root).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    const fixedTarget = fixture.root.querySelector<HTMLButtonElement>(
+      '[data-method="fixed"]',
+    )!;
+    fixedTarget.click();
+    await flush();
+    expect(fixedTarget.getAttribute("aria-pressed")).toBe("true");
+    expect(fixture.callService).not.toHaveBeenCalled();
+    expect(fixture.callWS).toHaveBeenCalledExactlyOnceWith({
+      type: "sax_power/dashboard/tariff/configure",
+      entry_id: "entry-1",
+      tariff_type: "time_of_use",
+      revision: "1",
+      charging_method: "fixed",
+    });
+  });
+  it.each(["time_of_use", "dynamic"] as const)(
+    "disables choosing all low-tariff windows for readonly %s",
+    async (type) => {
+      const fixture = await mount(type, { readonly: true });
+      expect(allLowTariffs(fixture.root).disabled).toBe(true);
+    },
+  );
+  it.each([
+    [null, 8, true],
+    [32, null, true],
+    [0, 0, false],
+    [-10, 0, false],
+  ])(
+    "with prices %s and %s, the all-low choice is disabled=%s",
+    async (basePrice, feedInPrice, disabled) => {
+      const fixture = await mount("time_of_use", { basePrice, feedInPrice });
+      expect(allLowTariffs(fixture.root).disabled).toBe(disabled);
+    },
+  );
 });
 for (const type of ["time_of_use", "dynamic"] as const)
   describe(`REQ-FIXED-TIME-GRID-CHARGE ${type}`, () => {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, useId } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
 import type { Language } from "../tabs";
+import type { HomeAssistant } from "../types";
 import TariffComparisonCostChart from "../components/TariffComparisonCostChart.vue";
 import TariffComparisonField from "../components/TariffComparisonField.vue";
 import TariffComparisonPrintReport from "../components/TariffComparisonPrintReport.vue";
@@ -9,16 +10,40 @@ import {
   calculateTariffComparison,
   validateAnnualConsumption,
   type ComparisonTariffError,
-  type ComparisonTariffInput,
   type ComparisonTariffWindowInput,
 } from "../tariff-comparison";
+import {
+  MAX_COMPARISON_TARIFFS,
+  useTariffComparisonStorage,
+  type SavedComparison,
+  type SavedComparisonTariff,
+} from "../tariff-comparison-storage";
 
-const props = defineProps<{ language: Language }>();
+const props = defineProps<{
+  language: Language;
+  hass?: HomeAssistant;
+  storageScope?: string;
+}>();
 
 const messages = {
   de: {
     annualConsumption: "Jahresverbrauch (kWh)",
     addTariff: "Tarif hinzufügen",
+    tariffLimit: (limit: number) => `Maximal ${limit} Tarife pro Vergleich.`,
+    storage: {
+      loading: "Gespeicherte Tarife werden geladen …",
+      pending: "Änderungen werden gespeichert …",
+      saving: "Änderungen werden gespeichert …",
+      saved: "Auf Home Assistant gespeichert.",
+      offline: "Offline. Dein Entwurf bleibt geöffnet.",
+      loadError: "Der Tarifvergleich konnte nicht geladen werden.",
+      saveError: "Der Tarifvergleich konnte nicht gespeichert werden.",
+      conflict:
+        "Auf Home Assistant wurde ein anderer Stand gespeichert. Wähle, welchen Stand du verwenden möchtest.",
+    },
+    retry: "Erneut versuchen",
+    keepDraft: "Eigenen Entwurf speichern",
+    loadStored: "Gespeicherte Tarife laden",
     reset: "Zurücksetzen",
     tariff: "Tarif",
     name: "Tarifname",
@@ -40,10 +65,12 @@ const messages = {
     window: "Zeitfenster",
     addWindow: "Zeitfenster hinzufügen",
     copyWindow: "Zeitfenster kopieren",
+    copy: "Kopieren",
     removeWindow: "Zeitfenster entfernen",
+    remove: "Entfernen",
     start: "Beginn",
     end: "Ende",
-    share: "Verbrauchsanteil (%)",
+    share: "Anteil (%)",
     comparison: "Jahreskosten im Vergleich",
     costChart: "Kostenverlauf",
     exportPdf: "Als PDF exportieren",
@@ -81,6 +108,21 @@ const messages = {
   en: {
     annualConsumption: "Annual consumption (kWh)",
     addTariff: "Add tariff",
+    tariffLimit: (limit: number) => `Up to ${limit} tariffs per comparison.`,
+    storage: {
+      loading: "Loading saved tariffs …",
+      pending: "Saving changes …",
+      saving: "Saving changes …",
+      saved: "Saved to Home Assistant.",
+      offline: "Offline. Your draft stays open.",
+      loadError: "The tariff comparison could not be loaded.",
+      saveError: "The tariff comparison could not be saved.",
+      conflict:
+        "A different version was saved to Home Assistant. Choose which version to use.",
+    },
+    retry: "Try again",
+    keepDraft: "Save my draft",
+    loadStored: "Load saved tariffs",
     reset: "Reset",
     tariff: "Tariff",
     name: "Tariff name",
@@ -102,10 +144,12 @@ const messages = {
     window: "Time window",
     addWindow: "Add time window",
     copyWindow: "Copy time window",
+    copy: "Copy",
     removeWindow: "Remove time window",
+    remove: "Remove",
     start: "Start",
     end: "End",
-    share: "Share of consumption (%)",
+    share: "Share (%)",
     comparison: "Annual cost comparison",
     costChart: "Cost trends",
     exportPdf: "Export as PDF",
@@ -143,10 +187,8 @@ const messages = {
 } as const;
 
 type WindowDraft = ComparisonTariffWindowInput & { id: string };
-type TariffDraft = ComparisonTariffInput & {
+type TariffDraft = Omit<SavedComparisonTariff, "windows"> & {
   id: string;
-  name: string;
-  number: number;
   windows: WindowDraft[];
 };
 
@@ -166,14 +208,53 @@ const percent = computed(
 const id = `sax-compare-${useId()}`;
 const view = ref<HTMLElement>();
 const addButton = ref<HTMLButtonElement>();
+let serial = 0;
+let tariffNumber = 0;
 const annualConsumption = ref("");
 const drafts = ref<TariffDraft[]>([]);
+const limitReached = computed(
+  () => drafts.value.length >= MAX_COMPARISON_TARIFFS,
+);
 const showCostChart = ref(false);
 const printContent = ref<HTMLElement>();
 const preparingPdf = ref(false);
 const exportError = ref<"popupBlocked" | "printFailed">();
-let serial = 0;
-let tariffNumber = 0;
+
+function restoreDraft(saved: SavedComparison): void {
+  tariffNumber = Math.max(0, ...saved.tariffs.map((tariff) => tariff.number));
+  annualConsumption.value = saved.annualConsumption;
+  drafts.value = saved.tariffs.map(({ windows, ...tariff }) => ({
+    ...tariff,
+    id: `${id}-tariff-${++serial}`,
+    windows: windows.map((window) => ({
+      ...window,
+      id: `${id}-window-${++serial}`,
+    })),
+  }));
+  showCostChart.value = false;
+  exportError.value = undefined;
+}
+
+const storage = useTariffComparisonStorage(
+  () => props.hass,
+  props.storageScope,
+  () => ({
+    annualConsumption: annualConsumption.value,
+    tariffs: drafts.value.map(({ id, windows, ...tariff }) => ({
+      ...tariff,
+      windows: windows.map(({ id, ...window }) => window),
+    })),
+  }),
+  restoreDraft,
+);
+const storageStatus = storage.status;
+const storageError = computed(() =>
+  ["loadError", "saveError", "conflict"].includes(storageStatus.value),
+);
+watch([annualConsumption, drafts], storage.changed, {
+  deep: true,
+  flush: "sync",
+});
 
 const comparisons = computed(() =>
   drafts.value.map((tariff) => ({
@@ -226,6 +307,7 @@ function focusField(field: string): void {
 }
 
 function addTariff(): void {
+  if (limitReached.value) return;
   const tariffId = `${id}-tariff-${++serial}`;
   drafts.value.push({
     id: tariffId,
@@ -355,6 +437,8 @@ async function exportPdf(): Promise<void> {
           ref="addButton"
           type="button"
           class="primary"
+          :disabled="limitReached"
+          :aria-describedby="limitReached ? `${id}-limit` : undefined"
           @click="addTariff"
         >
           {{ text.addTariff }}
@@ -385,6 +469,32 @@ async function exportPdf(): Promise<void> {
     </div>
     <p v-if="!drafts.length" class="hint">{{ text.noTariffs }}</p>
     <p v-else class="hint">{{ text.pricesHint }}</p>
+    <p v-if="limitReached" :id="`${id}-limit`" class="hint" role="status">
+      {{ text.tariffLimit(MAX_COMPARISON_TARIFFS) }}
+    </p>
+    <div
+      v-if="storageStatus !== 'local' && storageStatus !== 'ready'"
+      class="storage"
+    >
+      <p
+        :class="storageError ? 'error' : 'hint'"
+        :role="storageError ? 'alert' : 'status'"
+      >
+        {{ text.storage[storageStatus] }}
+      </p>
+      <div v-if="storageError" class="actions">
+        <button type="button" @click="storage.retry">
+          {{ storageStatus === "conflict" ? text.keepDraft : text.retry }}
+        </button>
+        <button
+          v-if="storageStatus === 'conflict'"
+          type="button"
+          @click="storage.acceptStored"
+        >
+          {{ text.loadStored }}
+        </button>
+      </div>
+    </div>
     <p v-if="exportError" class="error" role="alert">{{ text[exportError] }}</p>
 
     <div v-if="preparingPdf" ref="printContent" hidden>
@@ -467,33 +577,46 @@ async function exportPdf(): Promise<void> {
 
         <template v-if="tariff.type === 'time-of-use'">
           <p class="hint">{{ text.windowsHint }}</p>
-          <fieldset v-for="(window, index) in tariff.windows" :key="window.id">
+          <fieldset
+            v-for="(window, index) in tariff.windows"
+            :key="window.id"
+            class="window"
+          >
             <legend>{{ text.window }} {{ index + 1 }}</legend>
-            <div class="fields">
-              <TariffComparisonField
-                v-for="field in windowFields"
-                :id="`${window.id}-${field}`"
-                :key="field"
-                v-model="window[field]"
-                :label="text[field]"
-                :time="field === 'start' || field === 'end'"
-                :error="
-                  result.valid
-                    ? undefined
-                    : errorText(result.errors.windowFields[index]?.[field])
-                "
-              />
-            </div>
-            <div class="actions">
-              <button
-                type="button"
-                @click="addWindow(tariff, { index: index + 1, source: window })"
-              >
-                {{ text.copyWindow }}
-              </button>
-              <button type="button" @click="removeWindow(tariff, index)">
-                {{ text.removeWindow }}
-              </button>
+            <div class="window-row">
+              <div class="fields window-fields">
+                <TariffComparisonField
+                  v-for="field in windowFields"
+                  :id="`${window.id}-${field}`"
+                  :key="field"
+                  v-model="window[field]"
+                  :label="text[field]"
+                  :time="field === 'start' || field === 'end'"
+                  :error="
+                    result.valid
+                      ? undefined
+                      : errorText(result.errors.windowFields[index]?.[field])
+                  "
+                />
+              </div>
+              <div class="actions window-actions">
+                <button
+                  type="button"
+                  :aria-label="text.copyWindow"
+                  @click="
+                    addWindow(tariff, { index: index + 1, source: window })
+                  "
+                >
+                  {{ text.copy }}
+                </button>
+                <button
+                  type="button"
+                  :aria-label="text.removeWindow"
+                  @click="removeWindow(tariff, index)"
+                >
+                  {{ text.remove }}
+                </button>
+              </div>
             </div>
           </fieldset>
           <p v-if="!result.valid && result.errors.windows" class="error">
@@ -569,6 +692,11 @@ async function exportPdf(): Promise<void> {
   margin-top: 16px;
 }
 
+.storage {
+  display: grid;
+  gap: 4px;
+}
+
 .toolbar,
 .actions,
 .card-header {
@@ -610,7 +738,7 @@ async function exportPdf(): Promise<void> {
 }
 
 .tariff,
-fieldset {
+.window {
   display: grid;
   gap: 12px;
   min-width: 0;
@@ -621,7 +749,37 @@ fieldset {
 }
 
 .tariff {
+  container: comparison-tariff / inline-size;
   padding: 16px;
+}
+
+.window {
+  padding: 2px 8px 8px;
+}
+
+.window-row {
+  display: grid;
+  gap: 6px;
+}
+
+.window-fields,
+.window-actions {
+  gap: 6px;
+}
+
+@supports (grid-template-rows: subgrid) {
+  .window-fields > :deep(.field) {
+    grid-template-rows: subgrid;
+    grid-row: span 3;
+  }
+}
+
+.window-fields :deep(input) {
+  padding-inline: 6px;
+}
+
+.window-actions button {
+  padding-inline: 8px;
 }
 
 .tariff button {
@@ -751,8 +909,21 @@ small {
   font-weight: 600;
 }
 
+@container comparison-tariff (min-width: 26rem) {
+  .window-fields {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container comparison-tariff (min-width: 35rem) {
+  .window-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+}
+
 @container sax-content (max-width: 430px) {
-  .fields {
+  .fields:not(.window-fields) {
     grid-template-columns: minmax(0, 1fr);
   }
 

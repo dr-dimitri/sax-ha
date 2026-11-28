@@ -51,6 +51,31 @@ def test_only_the_daily_minimum_authorizes_charging() -> None:
     assert low_tariff_window(config, _local("2026-09-14T20:00:00")) is None
 
 
+def test_all_low_tariffs_merge_only_adjacent_windows_below_standard() -> None:
+    config = _config(
+        DailyPriceWindow(dt_time(22), dt_time(0), 0.1),
+        DailyPriceWindow(dt_time(0), dt_time(6), 0.2),
+        DailyPriceWindow(dt_time(6), dt_time(8), 0.3),
+        DailyPriceWindow(dt_time(8), dt_time(10), 0.4),
+    )
+
+    quote = low_tariff_window(
+        config, _local("2026-09-15T02:00:00"), below_base_price=True
+    )
+
+    assert quote is not None
+    assert quote.price_eur_kwh == 0.2
+    assert quote.valid_from == _local("2026-09-14T22:00:00")
+    assert quote.valid_until == _local("2026-09-15T06:00:00")
+    for hour in (6, 8, 10):
+        assert (
+            low_tariff_window(
+                config, _local(f"2026-09-15T{hour:02d}:00:00"), below_base_price=True
+            )
+            is None
+        )
+
+
 def test_unused_base_price_is_excluded_from_the_daily_minimum() -> None:
     config = _config(
         DailyPriceWindow(dt_time(22), dt_time(6), 0.2),

@@ -44,7 +44,7 @@ async function flush() {
   await nextTick();
   await nextTick();
 }
-async function mount(language = "de", withControl = false) {
+async function mount(language = "de", withControl = false, automatic = false) {
   let profile: TariffProfile | null = null;
   let dashboard!: ReturnType<typeof useSaxDashboard>;
   const switchId = "switch.renamed_planning";
@@ -120,7 +120,7 @@ async function mount(language = "de", withControl = false) {
         () => "entry-1",
       );
       provide(SAX_DASHBOARD_KEY, dashboard);
-      return () => h(ChargePlan, { hass: hass.value });
+      return () => h(ChargePlan, { hass: hass.value, automatic });
     },
   });
   apps.push(app);
@@ -131,7 +131,11 @@ async function mount(language = "de", withControl = false) {
     hass,
     callService,
     callWS,
-    async tariff(fixed: FixedTimeCharging, type = "time_of_use") {
+    async tariff(
+      fixed: FixedTimeCharging,
+      type = "time_of_use",
+      allLowTariffs = false,
+    ) {
       profile = {
         tariff_type: type,
         revision: "1",
@@ -140,6 +144,7 @@ async function mount(language = "de", withControl = false) {
         windows: [],
         can_edit: true,
         fixed_time_charging: fixed,
+        all_low_tariffs_enabled: allLowTariffs,
       };
       await dashboard.loadTariff();
       await flush();
@@ -209,6 +214,17 @@ async function mount(language = "de", withControl = false) {
 afterEach(() => {
   for (const app of apps.splice(0)) app.unmount();
   document.body.replaceChildren();
+});
+
+it("shows confirmed charging flow only after device feedback in all-low mode", async () => {
+  const fixture = await mount("de", false, true);
+  await fixture.tariff({ enabled: false, start: null }, "time_of_use", true);
+  await fixture.update("off", { ...charging, charging_active: false });
+  expect(fixture.root.textContent).toContain("unter dem Standardpreis");
+  expect(fixture.root.textContent).not.toContain("Ladung läuft");
+  await fixture.update("off", charging);
+  expect(fixture.root.textContent).toContain("Ladung läuft");
+  expect(fixture.root.textContent).toContain("Ladeleistung");
 });
 
 it.each(["de", "en"])(
